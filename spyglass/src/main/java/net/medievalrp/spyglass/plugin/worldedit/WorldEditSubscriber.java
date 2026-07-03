@@ -264,7 +264,7 @@ public final class WorldEditSubscriber {
             }
             drainScheduled = true;
             try {
-                Bukkit.getScheduler().runTask(plugin, () -> {
+                Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
                     drainScheduled = false;
                     drain();
                 });

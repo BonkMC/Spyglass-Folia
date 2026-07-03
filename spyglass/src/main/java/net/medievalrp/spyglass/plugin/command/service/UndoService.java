@@ -56,12 +56,12 @@ public final class UndoService {
             try {
                 opened = undoStack.openLatest(player.getUniqueId());
             } catch (RuntimeException ex) {
-                support.onMainThread(() -> player.sendMessage(
+                support.onEntity(player, () -> player.sendMessage(
                         Feedback.error("Undo lookup failed: " + ex.getMessage())));
                 return;
             }
             if (opened.isEmpty()) {
-                support.onMainThread(() -> player.sendMessage(
+                support.onEntity(player, () -> player.sendMessage(
                         Feedback.error("You have no valid actions to undo")));
                 return;
             }
@@ -84,7 +84,7 @@ public final class UndoService {
             decoded = UndoReferenceBson.decodeBase64(ref.referenceBase64());
         } catch (RuntimeException ex) {
             ref.close();
-            support.onMainThread(() -> player.sendMessage(
+            support.onEntity(player, () -> player.sendMessage(
                     Feedback.error("Undo reference unreadable: " + ex.getMessage())));
             return;
         }
@@ -93,7 +93,7 @@ public final class UndoService {
             original = RollbackMode.valueOf(decoded.mode());
         } catch (IllegalArgumentException ex) {
             ref.close();
-            support.onMainThread(() -> player.sendMessage(
+            support.onEntity(player, () -> player.sendMessage(
                     Feedback.error("Undo reference has unknown mode " + decoded.mode())));
             return;
         }
@@ -110,7 +110,7 @@ public final class UndoService {
                 decoded.request().flags(), decoded.request().grouping());
         String label = "undo " + ref.operationType().toLowerCase(Locale.ROOT)
                 + " " + ref.operationId().toString().substring(0, 8);
-        support.onMainThread(() -> rollbackService.executeReplay(
+        support.onEntity(player, () -> rollbackService.executeReplay(
                 player, replay, inverse, label,
                 () -> support.onAsyncThread(() -> {
                     try {
@@ -149,7 +149,7 @@ public final class UndoService {
                 // applyAllChunked must start on the main thread; block
                 // here so only one chunk is in flight at a time.
                 CompletableFuture<List<RollbackResult>> fut = new CompletableFuture<>();
-                support.onMainThread(() ->
+                support.onEntity(player, () ->
                         engine.applyAllChunked(effects, player, support, batchSize)
                                 .whenComplete((r, err) -> {
                                     if (err != null) {
@@ -180,7 +180,7 @@ public final class UndoService {
                     int progressApplied = applied;
                     int progressChunk = chunkNo;
                     int progressTotal = legacy.chunkCount();
-                    support.onMainThread(() -> player.sendActionBar(
+                    support.onEntity(player, () -> player.sendActionBar(
                             net.kyori.adventure.text.Component.text(
                                     "Undoing: " + progressApplied + " applied (chunk "
                                             + progressChunk + "/" + progressTotal + ")")));
@@ -193,7 +193,7 @@ public final class UndoService {
         } catch (RuntimeException ex) {
             Throwable cause = ex instanceof CompletionException && ex.getCause() != null
                     ? ex.getCause() : ex;
-            support.onMainThread(() -> player.sendMessage(
+            support.onEntity(player, () -> player.sendMessage(
                     Feedback.error("Undo failed: " + cause.getMessage())));
             return;
         } finally {
@@ -210,7 +210,7 @@ public final class UndoService {
         int finalSkipped = skipped;
         int finalErrors = errors;
         int finalChunks = chunks.size();
-        support.onMainThread(() -> player.sendMessage(
+        support.onEntity(player, () -> player.sendMessage(
                 RollbackService.summaryLine(new RollbackService.Summary(
                         finalApplied, finalSkipped, finalErrors,
                         finalChunks, elapsedMs))));

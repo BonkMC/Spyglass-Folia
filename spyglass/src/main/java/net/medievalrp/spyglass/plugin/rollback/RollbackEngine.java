@@ -289,9 +289,6 @@ public final class RollbackEngine {
             List<RollbackEffect> effects, CommandSender sender,
             ServiceSupport scheduler, int batchSize,
             AtomicBoolean cancelFlag) {
-        if (!Bukkit.isPrimaryThread()) {
-            throw new IllegalStateException("RollbackEngine.applyAllChunked must run on the main thread.");
-        }
         CompletableFuture<List<RollbackResult>> done = new CompletableFuture<>();
         if (effects.isEmpty()) {
             done.complete(List.of());
@@ -358,9 +355,8 @@ public final class RollbackEngine {
 
             sortParallelByChunk(blockReplaceIndices, blockReplaceEffects);
 
-            scheduler.onMainThread(() -> guarded(done, () -> applyChunkByChunk(0, effects, resultArray,
-                    blockReplaceIndices, blockReplaceEffects,
-                    sender, scheduler, batchSize, done, cancelFlag)));
+            scheduleBlockReplaceBatch(0, effects, resultArray, blockReplaceIndices,
+                    blockReplaceEffects, sender, scheduler, batchSize, done, cancelFlag, false);
         };
 
         if (worldWriteExecutor != null) {
@@ -369,6 +365,40 @@ public final class RollbackEngine {
             guarded(done, stageOne);
         }
         return done;
+    }
+
+    private void scheduleBlockReplaceBatch(int from,
+                                           List<RollbackEffect> effects,
+                                           RollbackResult[] resultArray,
+                                           List<Integer> blockReplaceIndices,
+                                           List<RollbackEffect.BlockReplace> blockReplaceEffects,
+                                           CommandSender sender,
+                                           ServiceSupport scheduler,
+                                           int batchSize,
+                                           CompletableFuture<List<RollbackResult>> done,
+                                           AtomicBoolean cancelFlag,
+                                           boolean delayed) {
+        if (from >= blockReplaceIndices.size()) {
+            scheduler.onMainThread(() -> guarded(done, () -> runContainerAndLeftover(
+                    effects, resultArray, sender, scheduler, batchSize, done)));
+            return;
+        }
+        BlockLocation location = blockReplaceEffects.get(from).location();
+        Optional<World> world = BlockLocations.resolveWorld(location);
+        Runnable task = () -> guarded(done, () -> applyChunkByChunk(
+                from, effects, resultArray, blockReplaceIndices, blockReplaceEffects,
+                sender, scheduler, batchSize, done, cancelFlag));
+        if (world.isEmpty()) {
+            scheduler.onMainThread(task);
+            return;
+        }
+        int chunkX = location.x() >> 4;
+        int chunkZ = location.z() >> 4;
+        if (delayed) {
+            scheduler.onRegionLater(world.get(), chunkX, chunkZ, 1L, task);
+            return;
+        }
+        scheduler.onRegion(world.get(), chunkX, chunkZ, task);
     }
 
     // Group entries by chunk and apply low Y first within each chunk.
@@ -529,7 +559,7 @@ public final class RollbackEngine {
             return;
         }
 
-        if (worldWriteExecutor != null) {
+        if (worldWriteExecutor != null && !scheduler.isRegionThreaded()) {
             applyChunkBatchParallel(from, effects, resultArray, blockReplaceIndices,
                     blockReplaceEffects,
                     sender, scheduler, batchSize, done, cancelFlag);
@@ -566,6 +596,12 @@ public final class RollbackEngine {
                             new RollbackReason.InvalidLocation(eff.location()));
                 }
             } else {
+                if (scheduler.isRegionThreaded()
+                        && !scheduler.isOwnedByCurrentRegion(world, cx, cz)) {
+                    scheduleBlockReplaceBatch(i, effects, resultArray, blockReplaceIndices,
+                            blockReplaceEffects, sender, scheduler, batchSize, done, cancelFlag, false);
+                    return;
+                }
                 // Resolve serverLevel + levelChunk once per chunk so
                 // writeBlock only re-resolves the section on Y crossings.
                 ChunkDirectWriter.ChunkContext chunkCtx =
@@ -610,21 +646,23 @@ public final class RollbackEngine {
             blocksThisTick += chunkEnd - i;
             i = chunkEnd;
 
-            if (System.nanoTime() - tickStart >= budgetNanos
+            if (scheduler.isRegionThreaded()
+                    || System.nanoTime() - tickStart >= budgetNanos
                     || blocksThisTick >= batchSize) {
                 break;
             }
         }
 
         if (sender instanceof Player p && total > 0) {
-            p.sendActionBar(Component.text("Rolling back " + i + " / " + total));
+            int appliedSoFar = i;
+            scheduler.onEntity(p, () ->
+                    p.sendActionBar(Component.text("Rolling back " + appliedSoFar + " / " + total)));
         }
 
         if (i < total) {
             int next = i;
-            scheduler.onMainThreadLater(1L, () -> guarded(done, () -> applyChunkByChunk(
-                    next, effects, resultArray, blockReplaceIndices, blockReplaceEffects,
-                    sender, scheduler, batchSize, done, cancelFlag)));
+            scheduleBlockReplaceBatch(next, effects, resultArray, blockReplaceIndices,
+                    blockReplaceEffects, sender, scheduler, batchSize, done, cancelFlag, true);
         } else {
             runContainerAndLeftover(effects, resultArray, sender, scheduler, batchSize, done);
         }
@@ -1023,9 +1061,6 @@ public final class RollbackEngine {
             UUID worldId, BlockColumns cols, CommandSender sender,
             ServiceSupport scheduler, int batchSize,
             AtomicBoolean cancelFlag) {
-        if (!Bukkit.isPrimaryThread()) {
-            throw new IllegalStateException("RollbackEngine.applyColumnsChunked must run on the main thread.");
-        }
         CompletableFuture<ApplyCounts> done = new CompletableFuture<>();
         ApplyCounts counts = new ApplyCounts();
         int total = cols.count();
@@ -1048,8 +1083,8 @@ public final class RollbackEngine {
         // Sort off-main (chunk-grouped, bottom-up Y), then apply on main.
         Runnable stageOne = () -> {
             int[] order = cols.chunkSortedOrder();
-            scheduler.onMainThread(() -> guarded(done, () -> applyColumnBatch(
-                    world, cols, order, 0, counts, sender, scheduler, batchSize, done, cancelFlag)));
+            scheduleColumnBatch(world, cols, order, 0, counts, sender, scheduler,
+                    batchSize, done, cancelFlag, false);
         };
         if (worldWriteExecutor != null) {
             CompletableFuture.runAsync(() -> guarded(done, stageOne), worldWriteExecutor);
@@ -1057,6 +1092,27 @@ public final class RollbackEngine {
             guarded(done, stageOne);
         }
         return done;
+    }
+
+    private void scheduleColumnBatch(World world, BlockColumns cols, int[] order, int from,
+                                     ApplyCounts counts, CommandSender sender,
+                                     ServiceSupport scheduler, int batchSize,
+                                     CompletableFuture<ApplyCounts> done,
+                                     AtomicBoolean cancelFlag, boolean delayed) {
+        if (from >= cols.count()) {
+            done.complete(counts);
+            return;
+        }
+        int startIdx = order[from];
+        int chunkX = cols.x(startIdx) >> 4;
+        int chunkZ = cols.z(startIdx) >> 4;
+        Runnable task = () -> guarded(done, () -> applyColumnBatch(
+                world, cols, order, from, counts, sender, scheduler, batchSize, done, cancelFlag));
+        if (delayed) {
+            scheduler.onRegionLater(world, chunkX, chunkZ, 1L, task);
+            return;
+        }
+        scheduler.onRegion(world, chunkX, chunkZ, task);
     }
 
     private void applyColumnBatch(World world, BlockColumns cols, int[] order, int from,
@@ -1075,7 +1131,9 @@ public final class RollbackEngine {
         }
         final Plugin ticketHolder = chunkTicketHolder;
         int parallelism = Math.max(1, worldWriteParallelism);
-        int maxBatchChunks = Math.max(parallelism, worldWriteBatchChunks);
+        int maxBatchChunks = scheduler.isRegionThreaded()
+                ? 1
+                : Math.max(parallelism, worldWriteBatchChunks);
         // Resolve up to maxBatchChunks chunks on the main thread: contiguous
         // runs of the sorted order share a chunk, so one walk groups them.
         List<ColChunk> batch = new ArrayList<>(Math.min(maxBatchChunks, 64));
@@ -1099,6 +1157,10 @@ public final class RollbackEngine {
             // speed; a cold region spreads its blocking getChunk loads over hops.
             boolean chunkLoaded = world.isChunkLoaded(cx, cz);
             if (deferForChunkLoadPacing(chunkLoaded, loadsThisHop, batch.isEmpty())) {
+                break;
+            }
+            if (scheduler.isRegionThreaded()
+                    && !scheduler.isOwnedByCurrentRegion(world, cx, cz)) {
                 break;
             }
             boolean ticketAdded = false;
@@ -1156,7 +1218,7 @@ public final class RollbackEngine {
         // Main-thread post: finish/resend each chunk, release tickets, sum
         // the per-chunk counts, then advance. The heavy palette writes
         // already happened off-main (or inline when no executor is wired).
-        Runnable afterWrites = () -> scheduler.onMainThread(() -> guarded(done, () -> {
+        Runnable postWrites = () -> guarded(done, () -> {
             Throwable postFailure = null;
             for (ColChunk cc : batch) {
                 try {
@@ -1204,12 +1266,21 @@ public final class RollbackEngine {
                 return;
             }
             if (sender instanceof Player p) {
-                p.sendActionBar(Component.text("Rolling back " + batchEnd + " / " + total));
+                scheduler.onEntity(p, () ->
+                        p.sendActionBar(Component.text("Rolling back " + batchEnd + " / " + total)));
             }
-            applyColumnBatch(world, cols, order, batchEnd, counts, sender, scheduler, batchSize, done, cancelFlag);
-        }));
+            scheduleColumnBatch(world, cols, order, batchEnd, counts, sender, scheduler,
+                    batchSize, done, cancelFlag, true);
+        });
+        Runnable afterWrites = () -> {
+            if (scheduler.isRegionThreaded()) {
+                postWrites.run();
+                return;
+            }
+            scheduler.onMainThread(postWrites);
+        };
 
-        if (worldWriteExecutor != null) {
+        if (worldWriteExecutor != null && !scheduler.isRegionThreaded()) {
             @SuppressWarnings("unchecked")
             CompletableFuture<Void>[] futures = new CompletableFuture[batch.size()];
             for (int b = 0; b < batch.size(); b++) {
@@ -1378,6 +1449,7 @@ public final class RollbackEngine {
                 buildAndEmit.run();
             }
         }
+        List<ContainerBatch> containerBatches = new ArrayList<>();
         Map<BlockLocation, List<Integer>> slotIndicesByLocation = new LinkedHashMap<>();
         Map<BlockLocation, List<RollbackEffect.ContainerSlotWrite>> slotEffectsByLocation = new LinkedHashMap<>();
         for (int index = 0; index < effects.size(); index++) {
@@ -1390,13 +1462,40 @@ public final class RollbackEngine {
             }
         }
         for (BlockLocation location : slotIndicesByLocation.keySet()) {
-            applyContainerBatch(location,
+            containerBatches.add(new ContainerBatch(location,
                     slotIndicesByLocation.get(location),
-                    slotEffectsByLocation.get(location),
-                    resultArray);
+                    slotEffectsByLocation.get(location)));
         }
 
+        if (scheduler.isRegionThreaded()) {
+            applyContainerBatchRegion(0, containerBatches,
+                    effects, resultArray, sender, scheduler, batchSize, done);
+            return;
+        }
+        for (ContainerBatch batch : containerBatches) {
+            applyContainerBatch(batch.location(), batch.indices(), batch.writes(), resultArray);
+        }
         applyLeftoverBatch(0, effects, resultArray, sender, scheduler, batchSize, done);
+    }
+
+    private void applyContainerBatchRegion(int index,
+                                           List<ContainerBatch> containerBatches,
+                                           List<RollbackEffect> effects,
+                                           RollbackResult[] resultArray,
+                                           CommandSender sender,
+                                           ServiceSupport scheduler,
+                                           int batchSize,
+                                           CompletableFuture<List<RollbackResult>> done) {
+        if (index >= containerBatches.size()) {
+            scheduleLeftoverBatch(0, effects, resultArray, sender, scheduler, batchSize, done, false);
+            return;
+        }
+        ContainerBatch batch = containerBatches.get(index);
+        scheduleLocation(batch.location(), scheduler, false, () -> guarded(done, () -> {
+            applyContainerBatch(batch.location(), batch.indices(), batch.writes(), resultArray);
+            applyContainerBatchRegion(index + 1, containerBatches,
+                    effects, resultArray, sender, scheduler, batchSize, done);
+        }));
     }
 
     private void applyLeftoverBatch(int from,
@@ -1408,8 +1507,9 @@ public final class RollbackEngine {
                                     CompletableFuture<List<RollbackResult>> done) {
         int total = effects.size();
         int processed = 0;
+        int maxProcessed = scheduler.isRegionThreaded() ? 1 : batchSize;
         int i = from;
-        while (i < total && processed < batchSize) {
+        while (i < total && processed < maxProcessed) {
             if (resultArray[i] == null) {
                 RollbackEffect effect = effects.get(i);
                 try {
@@ -1424,11 +1524,82 @@ public final class RollbackEngine {
         }
         if (i < total) {
             int next = i;
-            scheduler.onMainThreadLater(1L, () -> guarded(done, () -> applyLeftoverBatch(
-                    next, effects, resultArray, sender, scheduler, batchSize, done)));
+            scheduleLeftoverBatch(next, effects, resultArray, sender, scheduler, batchSize, done, true);
         } else {
             done.complete(List.of(resultArray));
         }
+    }
+
+    private void scheduleLeftoverBatch(int from,
+                                       List<RollbackEffect> effects,
+                                       RollbackResult[] resultArray,
+                                       CommandSender sender,
+                                       ServiceSupport scheduler,
+                                       int batchSize,
+                                       CompletableFuture<List<RollbackResult>> done,
+        boolean delayed) {
+        if (!scheduler.isRegionThreaded()) {
+            Runnable task = () -> guarded(done, () ->
+                    applyLeftoverBatch(from, effects, resultArray, sender, scheduler, batchSize, done));
+            if (delayed) {
+                scheduler.onMainThreadLater(1L, task);
+                return;
+            }
+            scheduler.onMainThread(task);
+            return;
+        }
+        int next = nextPendingEffect(from, effects, resultArray);
+        if (next >= effects.size()) {
+            done.complete(List.of(resultArray));
+            return;
+        }
+        BlockLocation location = locationOf(effects.get(next));
+        scheduleLocation(location, scheduler, delayed, () -> guarded(done, () ->
+                applyLeftoverBatch(next, effects, resultArray, sender, scheduler, batchSize, done)));
+    }
+
+    private int nextPendingEffect(int from, List<RollbackEffect> effects,
+                                  RollbackResult[] resultArray) {
+        int index = from;
+        while (index < effects.size() && resultArray[index] != null) {
+            index++;
+        }
+        return index;
+    }
+
+    private void scheduleLocation(BlockLocation location, ServiceSupport scheduler,
+                                  boolean delayed, Runnable runnable) {
+        if (location == null) {
+            scheduler.onMainThread(runnable);
+            return;
+        }
+        Optional<World> world = BlockLocations.resolveWorld(location);
+        if (world.isEmpty()) {
+            scheduler.onMainThread(runnable);
+            return;
+        }
+        int chunkX = location.x() >> 4;
+        int chunkZ = location.z() >> 4;
+        if (delayed) {
+            scheduler.onRegionLater(world.get(), chunkX, chunkZ, 1L, runnable);
+            return;
+        }
+        scheduler.onRegion(world.get(), chunkX, chunkZ, runnable);
+    }
+
+    private BlockLocation locationOf(RollbackEffect effect) {
+        return switch (effect) {
+            case RollbackEffect.BlockReplace blockReplace -> blockReplace.location();
+            case RollbackEffect.ContainerSlotWrite slotWrite -> slotWrite.location();
+            case RollbackEffect.EntitySpawn spawn -> spawn.location();
+            case RollbackEffect.EntityRemove remove -> remove.location();
+            case RollbackEffect.Custom custom -> custom.location();
+        };
+    }
+
+    private record ContainerBatch(BlockLocation location,
+                                  List<Integer> indices,
+                                  List<RollbackEffect.ContainerSlotWrite> writes) {
     }
 
     // Apply only the tile-entity payload, assuming material and

@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import net.medievalrp.spyglass.api.SpyglassApi;
@@ -131,8 +132,10 @@ import net.medievalrp.spyglass.plugin.command.service.tool.SqliteToolStateStore;
 import net.medievalrp.spyglass.plugin.command.service.tool.ToolStateStore;
 import net.medievalrp.spyglass.plugin.command.service.tool.WandInteractListener;
 import net.medievalrp.spyglass.plugin.util.FallingBlockTracker;
+import net.medievalrp.spyglass.plugin.util.ServerThreading;
 import net.medievalrp.spyglass.plugin.worldedit.WorldEditLifecycleListener;
 import net.medievalrp.spyglass.plugin.worldedit.WorldEditSubscriber;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
@@ -166,10 +169,10 @@ public final class SpyglassPlugin extends JavaPlugin {
      * cleanly land (shatter in water/lava, void, /kill, anti-cheat
      * despawn) accumulate forever -- #128.
      */
-    private org.bukkit.scheduler.BukkitTask fallingBlockPurgeTask;
+    private ScheduledTask fallingBlockPurgeTask;
     // #168: repeating async task that logs the ingest analytics report. Null
     // unless analytics.enabled; cancelled in onDisable.
-    private org.bukkit.scheduler.BukkitTask analyticsTask;
+    private ScheduledTask analyticsTask;
     private UndoStack undoStack;
     private ToolStateStore toolStateStore;
     private SalvageStore salvageStore;
@@ -315,7 +318,7 @@ public final class SpyglassPlugin extends JavaPlugin {
 
         recorder = new AsyncRecorder(
                 config.storage().queueCapacity(), config.storage().queueMax(),
-                recordStore, wal, spill, Bukkit::isPrimaryThread, getLogger());
+                recordStore, wal, spill, ServerThreading::isTickThread, getLogger());
         // #180: cap how fast the drain reclaims a large on-disk spill backlog in
         // the background, so it never saturates the store on a live server.
         recorder.setSpillDrainRate(config.storage().spillDrainRate());
@@ -672,18 +675,17 @@ public final class SpyglassPlugin extends JavaPlugin {
         // is 2x the TTL (30 s), meaning every cohort of cascade cells is guaranteed
         // at least one full sweep opportunity before a second TTL window elapses.
         // Delay matches the period so the first pass is not immediately at boot.
-        final long PURGE_PERIOD_TICKS = 1200L; // 60 s at 20 TPS
-        this.fallingBlockPurgeTask = getServer().getScheduler()
-                .runTaskTimerAsynchronously(this, FallingBlockTracker::purgeExpired,
-                        PURGE_PERIOD_TICKS, PURGE_PERIOD_TICKS);
+        this.fallingBlockPurgeTask = Bukkit.getAsyncScheduler().runAtFixedRate(
+                this, task -> FallingBlockTracker.purgeExpired(), 60L, 60L, TimeUnit.SECONDS);
 
         // #168: periodic ingest analytics report (off the main thread; only
         // reads concurrent counters + cheap gauges). Off unless analytics.enabled.
         if (ingestStats != null) {
-            long intervalTicks = Math.max(20L, config.analytics().interval().seconds() * 20L);
-            this.analyticsTask = getServer().getScheduler().runTaskTimerAsynchronously(
-                    this, new IngestStatsReporter(ingestStats, getLogger()),
-                    intervalTicks, intervalTicks);
+            long intervalSeconds = Math.max(1L, config.analytics().interval().seconds());
+            IngestStatsReporter analyticsReporter = new IngestStatsReporter(ingestStats, getLogger());
+            this.analyticsTask = Bukkit.getAsyncScheduler().runAtFixedRate(
+                    this, task -> analyticsReporter.run(),
+                    intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
             getLogger().info("Spyglass analytics enabled: ingest report every "
                     + config.analytics().interval().seconds() + "s and via /spyglass stats.");
         }

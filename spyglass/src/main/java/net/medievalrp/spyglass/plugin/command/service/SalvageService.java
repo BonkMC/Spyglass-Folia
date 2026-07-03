@@ -43,7 +43,7 @@ public final class SalvageService {
         // read off-thread and print back on the main thread.
         support.onAsyncThread(() -> {
             List<SalvageSnapshot> snaps = store.list(listLimit);
-            support.onMainThread(() -> renderListing(sender, snaps));
+            support.onSender(sender, () -> renderListing(sender, snaps));
         });
     }
 

@@ -206,7 +206,7 @@ public final class RollbackService {
     public void execute(CommandSender sender, String raw, RollbackMode mode) {
         // Resolve any ip: addresses off-thread first; the continuation runs the
         // parse + queueing on the main thread. No ip: -> runs inline.
-        ipResolver.resolve(raw, resolved -> executeResolved(sender, raw, mode, resolved));
+        ipResolver.resolve(sender, raw, resolved -> executeResolved(sender, raw, mode, resolved));
     }
 
     private void executeResolved(CommandSender sender, String raw, RollbackMode mode,
@@ -261,7 +261,7 @@ public final class RollbackService {
                 + " starting before the recorder drained: " + detail
                 + ". The newest events may be missing from this rollback; re-run once the"
                 + " backlog clears (see /spyglass stats) to catch them.");
-        support.onMainThread(() -> job.sender.sendMessage(Feedback.bonus(
+        support.onSender(job.sender, () -> job.sender.sendMessage(Feedback.bonus(
                 "Recorder still draining: " + detail + ". Rollback may miss the most recent"
                 + " events; re-run after it clears to catch the rest.")));
     }
@@ -381,7 +381,7 @@ public final class RollbackService {
         // direction. Nothing is captured per effect.
 
         if (startCursor != null) {
-            support.onMainThread(() -> sender.sendMessage(Feedback.bonus(
+            support.onSender(sender, () -> sender.sendMessage(Feedback.bonus(
                     "Resuming from cursor: " + initialApplied + " applied + "
                             + initialSkipped + " skipped before crash.")));
         }
@@ -541,31 +541,29 @@ public final class RollbackService {
                         UUID worldId = worldCols.getKey();
                         java.util.concurrent.CompletableFuture<RollbackEngine.ApplyCounts> fut =
                                 new java.util.concurrent.CompletableFuture<>();
-                        support.onMainThread(() ->
-                                engine.applyColumnsChunked(worldId, cols, sender, support, batchSize, cancelFlag)
-                                        .whenComplete((c, err) -> {
-                                            if (err != null) fut.completeExceptionally(err);
-                                            else fut.complete(c);
-                                        }));
+                        engine.applyColumnsChunked(worldId, cols, sender, support, batchSize, cancelFlag)
+                                .whenComplete((c, err) -> {
+                                    if (err != null) fut.completeExceptionally(err);
+                                    else fut.complete(c);
+                                });
                         counts.add(fut.join());
                     }
                     if (!window.complex().isEmpty()) {
                         java.util.concurrent.CompletableFuture<List<RollbackResult>> fut =
                                 new java.util.concurrent.CompletableFuture<>();
                         List<RollbackEffect> complex = window.complex();
-                        support.onMainThread(() ->
-                                engine.applyAllChunked(complex, sender, support, batchSize, cancelFlag)
-                                        .whenComplete((r, err) -> {
-                                            if (err != null) fut.completeExceptionally(err);
-                                            else fut.complete(r);
-                                        }));
+                        engine.applyAllChunked(complex, sender, support, batchSize, cancelFlag)
+                                .whenComplete((r, err) -> {
+                                    if (err != null) fut.completeExceptionally(err);
+                                    else fut.complete(r);
+                                });
                         complexResults = fut.join();
                     }
                 } catch (java.util.concurrent.CompletionException ex) {
                     Throwable cause = ex.getCause() == null ? ex : ex.getCause();
                     logger.warning("Spyglass " + mode.label() + " window apply failed: " + cause);
                     final String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
-                    support.onMainThread(() -> sender.sendMessage(
+                    support.onSender(sender, () -> sender.sendMessage(
                             Feedback.error(mode.label() + " failed: " + msg)));
                     return;
                 }
@@ -617,7 +615,7 @@ public final class RollbackService {
                 if (sender instanceof Player progressTarget) {
                     int appliedSoFar = totalApplied;
                     int skippedSoFar = totalSkipped;
-                    support.onMainThread(() -> progressTarget.sendActionBar(
+                    support.onEntity(progressTarget, () -> progressTarget.sendActionBar(
                             net.kyori.adventure.text.Component.text(
                                     "Rolling back: " + appliedSoFar + " applied, " + skippedSoFar + " skipped")));
                 }
@@ -628,14 +626,14 @@ public final class RollbackService {
                 logger.warning("Spyglass " + mode.label() + " stream read failed: " + readFailed);
                 final String msg = readFailed.getMessage() == null
                         ? readFailed.toString() : readFailed.getMessage();
-                support.onMainThread(() -> sender.sendMessage(
+                support.onSender(sender, () -> sender.sendMessage(
                         Feedback.error(mode.label() + " failed: " + msg)));
                 return;
             }
         } catch (RuntimeException unexpected) {
             logger.warning("Spyglass " + mode.label() + " streaming failure: " + unexpected);
             final String msg = unexpected.getMessage() == null ? unexpected.toString() : unexpected.getMessage();
-            support.onMainThread(() -> sender.sendMessage(
+            support.onSender(sender, () -> sender.sendMessage(
                     Feedback.error(mode.label() + " failed: " + msg)));
             return;
         } finally {
@@ -646,7 +644,7 @@ public final class RollbackService {
         }
 
         if (totalSeen == 0) {
-            support.onMainThread(() -> sender.sendMessage(Feedback.error("No results.")));
+            support.onSender(sender, () -> sender.sendMessage(Feedback.error("No results.")));
             return;
         }
 
@@ -733,7 +731,7 @@ public final class RollbackService {
         Summary summary = new Summary(totalApplied, totalSkipped, totalErrors,
                 chunkCount, elapsedMs);
         boolean undoUnavailableFinal = undoUnavailable;
-        support.onMainThread(() -> deliverStreamingSummary(
+        support.onSender(sender, () -> deliverStreamingSummary(
                 sender, mode, summary, skipCounts, undoUnavailableFinal));
     }
 
@@ -1059,8 +1057,20 @@ public final class RollbackService {
                 for (Long key : chunks) {
                     keys[i++] = key;
                 }
+                if (support.isRegionThreaded()) {
+                    for (long key : keys) {
+                        int cx = ChunkRelighter.chunkX(key);
+                        int cz = ChunkRelighter.chunkZ(key);
+                        support.onRegion(world, cx, cz, () -> ChunkRelighter.relight(world,
+                                new long[]{key},
+                                (relitX, relitZ) -> support.onRegion(world, relitX, relitZ,
+                                        () -> ChunkResender.resend(world, relitX, relitZ))));
+                    }
+                    continue;
+                }
                 support.onMainThread(() -> ChunkRelighter.relight(world, keys,
-                        (cx, cz) -> support.onMainThread(() -> ChunkResender.resend(world, cx, cz))));
+                        (cx, cz) -> support.onRegion(world, cx, cz,
+                                () -> ChunkResender.resend(world, cx, cz))));
             }
         } catch (Throwable t) {
             // Relight is best-effort: a lighting-refresh hiccup must never

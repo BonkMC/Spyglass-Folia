@@ -15,7 +15,6 @@ import net.medievalrp.spyglass.plugin.listener.RecordingSupport;
 import net.medievalrp.spyglass.plugin.pipeline.Recorder;
 import net.medievalrp.spyglass.plugin.util.BlockLocations;
 import net.medievalrp.spyglass.plugin.util.ItemSerialization;
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -68,7 +67,7 @@ public final class BundleTransactionListener implements RecordingListener {
         int slotIndex = event.getSlot();
         int rawSlot = event.getRawSlot();
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        player.getScheduler().runDelayed(plugin, task -> {
             if (slotSnap != null) {
                 ItemStack afterStack = rawSlot >= 0 ? event.getView().getItem(rawSlot) : null;
                 diffAndEmit(player, slotSnap, slotIndex, afterStack);
@@ -77,7 +76,7 @@ public final class BundleTransactionListener implements RecordingListener {
                 ItemStack afterCursor = player.getItemOnCursor();
                 diffAndEmit(player, cursorSnap, -1, afterCursor);
             }
-        });
+        }, null, 1L);
     }
 
     private static Snapshot snapshotOf(ItemStack stack) {

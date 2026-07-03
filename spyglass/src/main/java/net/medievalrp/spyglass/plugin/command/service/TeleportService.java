@@ -59,7 +59,7 @@ public final class TeleportService {
             sender.sendMessage(Feedback.error("Teleport coordinates out of range."));
             return;
         }
-        player.teleport(new Location(world, x, y, z));
+        player.teleportAsync(new Location(world, x, y, z));
     }
 
     private static World resolveWorld(String arg) {

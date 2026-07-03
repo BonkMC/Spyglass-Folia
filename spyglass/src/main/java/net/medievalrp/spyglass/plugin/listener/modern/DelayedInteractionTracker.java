@@ -23,7 +23,7 @@ public final class DelayedInteractionTracker {
      */
     public void scheduleAfter(int delayTicks, Player player, Location location,
                               Consumer<DelayedContext> callback) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        Bukkit.getRegionScheduler().runDelayed(plugin, location, task -> {
             Block current = location.getBlock();
             Material nowMaterial = current.getType();
             callback.accept(new DelayedContext(player, location, nowMaterial));

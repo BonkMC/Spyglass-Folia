@@ -83,8 +83,8 @@ public final class AsyncRecorder implements Recorder {
     // Hard queue ceiling that off-main producers backpressure against;
     // <= 0 means unbounded (legacy behaviour). See awaitCapacityIfBlockable.
     private final long queueMax;
-    // Reports whether the calling thread is the Bukkit server thread, which
-    // is never blocked by the ceiling. Bukkit::isPrimaryThread in production.
+    // Reports whether the calling thread is a Bukkit tick thread, which is
+    // never blocked by the ceiling.
     private final BooleanSupplier primaryThread;
     private final RecordStore store;
     private final WalDurability wal;
@@ -170,9 +170,9 @@ public final class AsyncRecorder implements Recorder {
     /**
      * Full constructor. {@code queueMax} is the hard queue ceiling that
      * off-main producers backpressure against (≤ 0 = unbounded);
-     * {@code primaryThread} reports whether the calling thread is the
-     * Bukkit server thread, which is never blocked by the ceiling. The
-     * plugin passes {@code Bukkit::isPrimaryThread}; headless tests pass a
+     * {@code primaryThread} reports whether the calling thread is a
+     * Bukkit tick thread, which is never blocked by the ceiling. The
+     * plugin passes a server-thread check; headless tests pass a
      * controllable fake.
      */
     public AsyncRecorder(long warnThreshold, long queueMax, RecordStore store,

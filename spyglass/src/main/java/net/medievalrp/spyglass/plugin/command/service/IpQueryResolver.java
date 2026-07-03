@@ -8,19 +8,19 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 import net.medievalrp.spyglass.plugin.command.param.IpParam;
 import net.medievalrp.spyglass.plugin.command.param.QueryStringParser;
+import org.bukkit.command.CommandSender;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Pre-resolves {@code ip:} query values OFF the main thread so the blocking
+ * Pre-resolves {@code ip:} query values off the command thread so the blocking
  * store lookup never sits on the command thread.
  *
  * <p>{@code IpParam.parse} would otherwise call the record store synchronously
- * at parse time, and commands run inline on the main server thread (the simple
- * execution coordinator). This splits the work: scan for {@code ip:} values on
- * the calling thread (cheap, pure string), resolve them on the async pool, then
- * run the parse continuation back on the main thread with the resolved UUIDs in
- * hand. Parse itself stays on the main thread, where it must be (it reads the
- * player location and the WorldEdit selection).
+ * at parse time. This splits the work: scan for {@code ip:} values on the
+ * calling thread (cheap, pure string), resolve them on the async pool, then run
+ * the parse continuation back on the sender's scheduler with the resolved UUIDs
+ * in hand. Parse itself stays on a server-owned thread, where it must be (it
+ * reads the player location and the WorldEdit selection).
  */
 @ApiStatus.Internal
 public final class IpQueryResolver {
@@ -40,7 +40,7 @@ public final class IpQueryResolver {
 
     /**
      * Resolve any {@code ip:} addresses in {@code raw}, then hand the resolved
-     * map to {@code continuation} ON THE MAIN THREAD.
+     * map to {@code continuation} on a server-owned thread.
      *
      * <p>Fast path: when the query has no {@code ip:} token there is nothing to
      * resolve, so {@code continuation} runs immediately on the calling thread
@@ -48,6 +48,11 @@ public final class IpQueryResolver {
      * overwhelming majority of searches.
      */
     public void resolve(String raw, Consumer<Map<String, List<UUID>>> continuation) {
+        resolve(null, raw, continuation);
+    }
+
+    public void resolve(CommandSender sender, String raw,
+                        Consumer<Map<String, List<UUID>>> continuation) {
         List<String> ips = parser.extractIpValues(raw);
         if (ips == null || ips.isEmpty()) {
             continuation.accept(Map.of());
@@ -64,7 +69,11 @@ public final class IpQueryResolver {
                     logger.warning("Spyglass ip: resolve failed for " + ip + ": " + ex.getMessage());
                 }
             }
-            support.onMainThread(() -> continuation.accept(resolved));
+            if (sender == null) {
+                support.onMainThread(() -> continuation.accept(resolved));
+                return;
+            }
+            support.onSender(sender, () -> continuation.accept(resolved));
         });
     }
 }

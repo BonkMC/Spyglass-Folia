@@ -128,11 +128,7 @@ class RollbackEngineChaosTest {
     }
 
     @Test
-    void primaryThreadAssertionRefusesBackgroundCall() {
-        // The engine intentionally crashes loudly when called off
-        // the main server thread — a regression here would
-        // silently corrupt world state under concurrent rollback
-        // calls.
+    void backgroundCallCompletesThroughScheduler() {
         try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
             bukkit.when(Bukkit::isPrimaryThread).thenReturn(false);
 
@@ -144,10 +140,10 @@ class RollbackEngineChaosTest {
                     snapshot(Material.STONE, "minecraft:stone"),
                     snapshot(Material.AIR, "minecraft:air")));
 
-            assertThat(org.junit.jupiter.api.Assertions.assertThrows(
-                    IllegalStateException.class,
-                    () -> engine.applyAll(oneEffect, sender)).getMessage())
-                    .contains("main thread");
+            List<RollbackResult> results = engine.applyAll(oneEffect, sender);
+
+            assertThat(results).hasSize(1);
+            assertThat(results.getFirst()).isInstanceOf(RollbackResult.Skipped.class);
         }
     }
 
