@@ -53,7 +53,7 @@ public final class ChunkRadiusParam implements QueryParamHandler {
         int cx = origin.x() >> 4;
         int cz = origin.z() >> 4;
         return new QueryPredicate.And(List.of(
-                new QueryPredicate.Eq("location.worldId", origin.worldId()),
+                WorldPredicates.matches(origin),
                 new QueryPredicate.Range("location.x", (cx - expand) << 4, ((cx + expand) << 4) + 15),
                 new QueryPredicate.Range("location.y", minY, maxY),
                 new QueryPredicate.Range("location.z", (cz - expand) << 4, ((cz + expand) << 4) + 15)));

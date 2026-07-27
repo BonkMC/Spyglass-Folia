@@ -53,7 +53,7 @@ public final class SearchService {
         // Resolve any ip: addresses off-thread first (see IpQueryResolver); the
         // continuation runs the parse on the main thread with the result in hand.
         // No ip: -> the continuation runs inline, same as before.
-        ipResolver.resolve(raw, resolved -> {
+        ipResolver.resolve(sender, raw, resolved -> {
             QueryRequest request;
             try {
                 request = parser.parse(sender, raw, 0, resolved);
@@ -70,11 +70,11 @@ public final class SearchService {
         searchQuery(request).whenComplete((result, error) -> {
             if (error != null) {
                 logger.warning("Spyglass search failed: " + error);
-                support.onMainThread(() -> sender.sendMessage(
+                support.onSender(sender, () -> sender.sendMessage(
                         Feedback.error("Query failed: " + error.getMessage())));
                 return;
             }
-            support.onMainThread(() -> handleResults(sender, request, result));
+            support.onSender(sender, () -> handleResults(sender, request, result));
         });
     }
 

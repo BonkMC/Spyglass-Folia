@@ -416,6 +416,24 @@ class SqliteRecordStoreTest {
     }
 
     @Test
+    void namePredicatesResolvePaletteBackedPlayersAndWorlds() {
+        BlockBreakRecord record = breakAt(
+                UUID.randomUUID(),
+                "Alice",
+                1,
+                1,
+                simple(Material.STONE, "minecraft:stone"),
+                simple(Material.AIR, "minecraft:air"));
+        store.save(List.of(record));
+
+        QueryResult found = store.query(request(List.of(
+                new QueryPredicate.Eq("source.playerName", "alice"),
+                new QueryPredicate.Eq("location.worldName", "world"))));
+
+        assertThat(found.records()).containsExactly(record);
+    }
+
+    @Test
     void itemTagFilterFallsToPostFilter() {
         // itags: lives inside the per-event blob (no column), so SQLite pushes
         // what it can and matches custom_data in memory (#140), the same

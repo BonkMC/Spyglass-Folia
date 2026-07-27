@@ -67,7 +67,7 @@ public final class RbqueueService {
         RollbackJobQueue.Snapshot snap = queue.snapshot();
         support.onAsyncThread(() -> {
             List<RollbackResumeStore.Saved> resumePending = resumeStore.listPending();
-            support.onMainThread(() -> renderList(sender, snap, resumePending));
+            support.onSender(sender, () -> renderList(sender, snap, resumePending));
         });
     }
 
@@ -147,7 +147,7 @@ public final class RbqueueService {
         // write) back on the main thread, where the rollback queue is driven.
         support.onAsyncThread(() -> {
             List<RollbackResumeStore.Saved> pending = resumeStore.listPending();
-            support.onMainThread(() -> cancelResolved(sender, idArg, pending));
+            support.onSender(sender, () -> cancelResolved(sender, idArg, pending));
         });
     }
 
@@ -196,7 +196,7 @@ public final class RbqueueService {
         // and must stay on the main thread, so bounce back before calling it.
         support.onAsyncThread(() -> {
             List<RollbackResumeStore.Saved> pending = resumeStore.listPending();
-            support.onMainThread(() -> resumeResolved(sender, idArg, pending));
+            support.onSender(sender, () -> resumeResolved(sender, idArg, pending));
         });
     }
 

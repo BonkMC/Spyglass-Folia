@@ -42,7 +42,7 @@ final class SenderProgress extends PrintStream {
             for (String line : complete.split("\n", -1)) {
                 if (!line.isBlank()) {
                     String msg = line.stripTrailing();
-                    support.onMainThread(() -> sender.sendMessage(
+                    support.onSender(sender, () -> sender.sendMessage(
                             net.medievalrp.spyglass.plugin.command.render.Feedback.info(msg)));
                 }
             }

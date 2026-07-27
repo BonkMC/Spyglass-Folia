@@ -32,15 +32,17 @@ public final class SalvageViews {
      */
     @Nullable
     public static SalvageView guiOrNull(Plugin plugin, String bukkitVersion, SalvageStore store,
-                                        Executor storeExecutor, Executor mainExecutor,
-                                        SalvageWithdrawals withdrawals, int rollbackListLimit,
+                                        Executor storeExecutor,
+                                        java.util.function.BiConsumer<org.bukkit.entity.Player, Runnable>
+                                                playerExecutor,
+                                        SalvageWithdrawalDispatcher withdrawals, int rollbackListLimit,
                                         Logger logger) {
         if (!invUiSupported(bukkitVersion)) {
             return null;
         }
         // Referenced only here: on an unsupported server this line never runs,
         // so no InvUI class is resolved/loaded.
-        return new InvUiSalvageView(plugin, store, storeExecutor, mainExecutor,
+        return new InvUiSalvageView(plugin, store, storeExecutor, playerExecutor,
                 withdrawals, rollbackListLimit, logger);
     }
 

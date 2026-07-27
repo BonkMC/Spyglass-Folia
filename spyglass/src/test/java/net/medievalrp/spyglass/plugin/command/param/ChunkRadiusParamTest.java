@@ -23,9 +23,10 @@ class ChunkRadiusParamTest {
         QueryPredicate.And and = (QueryPredicate.And) predicate;
         assertThat(and.predicates()).hasSize(4);
 
-        QueryPredicate.Eq worldEq = (QueryPredicate.Eq) and.predicates().get(0);
-        assertThat(worldEq.field()).isEqualTo("location.worldId");
-        assertThat(worldEq.value()).isEqualTo(WORLD);
+        QueryPredicate.Or worldMatch = (QueryPredicate.Or) and.predicates().get(0);
+        assertThat(worldMatch.predicates()).containsExactly(
+                new QueryPredicate.Eq("location.worldId", WORLD),
+                new QueryPredicate.Eq("location.worldName", "world"));
 
         assertRange(and.predicates().get(1), "location.x", 96, 111);
         assertRange(and.predicates().get(2), "location.y", -64, 319);

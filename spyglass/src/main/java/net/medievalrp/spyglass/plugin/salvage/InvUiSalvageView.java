@@ -71,17 +71,23 @@ final class InvUiSalvageView implements SalvageView {
 
     private final SalvageStore store;
     private final Executor storeExecutor;
-    private final Executor mainExecutor;
+    private final java.util.function.BiConsumer<Player, Runnable> playerExecutor;
     private final int rollbackListLimit;
     private final Logger logger;
-    private final SalvageWithdrawals withdrawals;
+    private final SalvageWithdrawalDispatcher withdrawals;
     private final InFlightTracker inFlight;
 
-    InvUiSalvageView(Plugin plugin, SalvageStore store, Executor storeExecutor, Executor mainExecutor,
-                     SalvageWithdrawals withdrawals, int rollbackListLimit, Logger logger) {
+    InvUiSalvageView(
+            Plugin plugin,
+            SalvageStore store,
+            Executor storeExecutor,
+            java.util.function.BiConsumer<Player, Runnable> playerExecutor,
+            SalvageWithdrawalDispatcher withdrawals,
+            int rollbackListLimit,
+            Logger logger) {
         this.store = store;
         this.storeExecutor = storeExecutor;
-        this.mainExecutor = mainExecutor;
+        this.playerExecutor = playerExecutor;
         this.rollbackListLimit = rollbackListLimit;
         this.logger = logger;
         this.withdrawals = withdrawals;
@@ -101,7 +107,7 @@ final class InvUiSalvageView implements SalvageView {
     // ---- level openers -------------------------------------------------
 
     private void openRollbacks(Player player) {
-        readThenOpen(() -> store.listRollbacks(rollbackListLimit),
+        readThenOpen(player, () -> store.listRollbacks(rollbackListLimit),
                 groups -> showRollbacks(player, groups));
     }
 
@@ -122,7 +128,7 @@ final class InvUiSalvageView implements SalvageView {
     }
 
     private void openChests(Player player, UUID rollbackId) {
-        readThenOpen(() -> store.listByRollback(rollbackId, FETCH_CAP),
+        readThenOpen(player, () -> store.listByRollback(rollbackId, FETCH_CAP),
                 snaps -> showChests(player, rollbackId, snaps));
     }
 
@@ -210,7 +216,7 @@ final class InvUiSalvageView implements SalvageView {
      * {@code open} on the main thread (InvUI window construction must run there).
      * A read failure is logged and drops the open rather than throwing off-thread.
      */
-    private <T> void readThenOpen(Supplier<T> read, Consumer<T> open) {
+    private <T> void readThenOpen(Player player, Supplier<T> read, Consumer<T> open) {
         storeExecutor.execute(() -> {
             T result;
             try {
@@ -219,7 +225,7 @@ final class InvUiSalvageView implements SalvageView {
                 logger.warning("Spyglass salvage GUI read failed: " + ex.getMessage());
                 return;
             }
-            mainExecutor.execute(() -> open.accept(result));
+            playerExecutor.accept(player, () -> open.accept(result));
         });
     }
 
@@ -296,16 +302,16 @@ final class InvUiSalvageView implements SalvageView {
 
         @Override
         public void handleClick(ClickType clickType, Player who, InventoryClickEvent event) {
-            SalvageWithdrawals.Outcome outcome = withdrawals.withdraw(player, snap, index);
-            switch (outcome.status()) {
-                case FULL -> player.sendMessage(
-                        Component.text("Your inventory is full.", NamedTextColor.RED));
-                case EMPTIED -> openChests(player, rollbackId);
-                case TAKEN -> openItems(player, rollbackId, outcome.updated());
-                case REFUSED, SKIPPED -> {
-                    // Refused (dupe guard) or nothing to take: leave the view as-is.
+            withdrawals.withdraw(player, snap, index, outcome -> {
+                switch (outcome.status()) {
+                    case FULL -> player.sendMessage(
+                            Component.text("Your inventory is full.", NamedTextColor.RED));
+                    case EMPTIED -> openChests(player, rollbackId);
+                    case TAKEN -> openItems(player, rollbackId, outcome.updated());
+                    case REFUSED, SKIPPED -> {
+                    }
                 }
-            }
+            });
         }
     }
 

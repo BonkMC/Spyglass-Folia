@@ -22,6 +22,7 @@ import net.medievalrp.spyglass.plugin.rollback.RollbackEngine;
 import net.medievalrp.spyglass.plugin.rollback.UndoStack;
 import net.medievalrp.spyglass.plugin.storage.UndoReferenceBson;
 import net.medievalrp.spyglass.plugin.util.ChunkRelighter;
+import net.medievalrp.spyglass.plugin.util.WorldReference;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.ApiStatus;
@@ -59,12 +60,12 @@ public final class UndoService {
             try {
                 opened = undoStack.openLatest(player.getUniqueId());
             } catch (RuntimeException ex) {
-                support.onMainThread(() -> player.sendMessage(
+                support.onPlayer(player, () -> player.sendMessage(
                         Feedback.error("Undo lookup failed: " + ex.getMessage())));
                 return;
             }
             if (opened.isEmpty()) {
-                support.onMainThread(() -> player.sendMessage(
+                support.onPlayer(player, () -> player.sendMessage(
                         Feedback.error("You have no valid actions to undo")));
                 return;
             }
@@ -118,7 +119,7 @@ public final class UndoService {
                 decoded.request().flags(), decoded.request().grouping());
         String label = "undo " + ref.operationType().toLowerCase(Locale.ROOT)
                 + " " + ref.operationId().toString().substring(0, 8);
-        support.onMainThread(() -> rollbackService.executeReplay(
+        support.onPlayer(player, () -> rollbackService.executeReplay(
                 player, replay, inverse, label, decoded.entityAliases(),
                 () -> support.onAsyncThread(() -> {
                     try {
@@ -138,7 +139,7 @@ public final class UndoService {
                         try {
                             salvageStore.deleteByRollback(decoded.salvageGroup());
                         } catch (RuntimeException ex) {
-                            support.onMainThread(() -> player.sendMessage(Feedback.bonus(
+                            support.onPlayer(player, () -> player.sendMessage(Feedback.bonus(
                                     "Salvage entries for the undone rollback could not be"
                                             + " withdrawn; /sg inventory may still list them.")));
                         }
@@ -158,7 +159,7 @@ public final class UndoService {
         } finally {
             ref.close();
         }
-        support.onMainThread(() -> player.sendMessage(Feedback.error(message)));
+        support.onPlayer(player, () -> player.sendMessage(Feedback.error(message)));
     }
 
     // Pre-reference operation: stream the stored inverse effects chunk
@@ -173,7 +174,7 @@ public final class UndoService {
         // Touched chunks per world, packed for ChunkRelighter — the legacy
         // replay writes blocks through the same section-palette path that
         // skips the light engine, so it needs the same post-write relight.
-        Map<UUID, Set<Long>> touchedByWorld = new HashMap<>();
+        Map<WorldReference, Set<Long>> touchedByWorld = new HashMap<>();
         try {
             int chunkNo = 0;
             Optional<List<RollbackEffect>> chunk;
@@ -186,7 +187,7 @@ public final class UndoService {
                 // applyAllChunked must start on the main thread; block
                 // here so only one chunk is in flight at a time.
                 CompletableFuture<List<RollbackResult>> fut = new CompletableFuture<>();
-                support.onMainThread(() ->
+                support.onPlayer(player, () ->
                         engine.applyAllChunked(effects, player, support, batchSize)
                                 .whenComplete((r, err) -> {
                                     if (err != null) {
@@ -202,7 +203,8 @@ public final class UndoService {
                         if (loc != null) {
                             chunks.add(loc.worldId() + ":"
                                     + (loc.x() >> 4) + ":" + (loc.z() >> 4));
-                            touchedByWorld.computeIfAbsent(loc.worldId(), k -> new java.util.HashSet<>())
+                            touchedByWorld.computeIfAbsent(
+                                            WorldReference.from(loc), key -> new java.util.HashSet<>())
                                     .add(ChunkRelighter.packChunk(loc.x() >> 4, loc.z() >> 4));
                         }
                     } else if (result instanceof RollbackResult.Skipped sk) {
@@ -217,7 +219,7 @@ public final class UndoService {
                     int progressApplied = applied;
                     int progressChunk = chunkNo;
                     int progressTotal = legacy.chunkCount();
-                    support.onMainThread(() -> player.sendActionBar(
+                    support.onPlayer(player, () -> player.sendActionBar(
                             net.kyori.adventure.text.Component.text(
                                     "Undoing: " + progressApplied + " applied (chunk "
                                             + progressChunk + "/" + progressTotal + ")")));
@@ -230,7 +232,7 @@ public final class UndoService {
         } catch (RuntimeException ex) {
             Throwable cause = ex instanceof CompletionException && ex.getCause() != null
                     ? ex.getCause() : ex;
-            support.onMainThread(() -> player.sendMessage(
+            support.onPlayer(player, () -> player.sendMessage(
                     Feedback.error("Undo failed: " + cause.getMessage())));
             return;
         } finally {
@@ -247,7 +249,7 @@ public final class UndoService {
         int finalSkipped = skipped;
         int finalErrors = errors;
         int finalChunks = chunks.size();
-        support.onMainThread(() -> player.sendMessage(
+        support.onPlayer(player, () -> player.sendMessage(
                 RollbackService.summaryLine(new RollbackService.Summary(
                         finalApplied, finalSkipped, finalErrors,
                         finalChunks, elapsedMs))));

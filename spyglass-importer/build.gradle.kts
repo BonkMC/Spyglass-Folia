@@ -25,7 +25,7 @@ application {
 
 // Same Guava pin as the other modules — ClickHouse 0.9.x pulls 33.4.6
 // transitively, but we keep the runtime classpath consistent with the
-// version Paper / Velocity ship.
+// version used by Paper and the standalone importer.
 configurations.all {
     resolutionStrategy {
         force("com.google.guava:guava:33.3.1-jre")
@@ -40,7 +40,7 @@ dependencies {
 
     // BlockSnapshot.material is org.bukkit.Material. The CLI runs
     // outside any server, so paper-api has to be on the runtime
-    // classpath. Shaded into the fat jar like spyglass-velocity does.
+    // classpath. Shaded into the standalone fat jar.
     implementation("io.papermc.paper:paper-api:$paperApiVersion")
 
     // CLI parsing. Picocli is small, dependency-free, and emits good
@@ -68,9 +68,8 @@ dependencies {
 tasks.shadowJar {
     archiveBaseName.set("spyglass-importer")
     archiveClassifier.set("")
-    // Same Guava relocation rationale as spyglass-velocity: ClickHouse
-    // and Paper disagree on Guava version, and shadow's ASM remapper
-    // is fragile on broader rules. Keep it com.google.* only.
+    // ClickHouse and Paper disagree on Guava version, and shadow's ASM
+    // remapper is fragile on broader rules. Keep it com.google.* only.
     relocate("com.google.common", "net.medievalrp.spyglass.importer.shaded.guava")
     relocate("com.google.thirdparty", "net.medievalrp.spyglass.importer.shaded.guava.thirdparty")
 }
@@ -81,7 +80,7 @@ tasks.jar {
     // spyglass-importer-<ver>.jar path as the shaded shadowJar
     // (archiveClassifier = ""). Without this the two outputs collide and
     // Gradle 9's strict task-graph validation flags the dist / start-script
-    // tasks as consuming an undeclared output. Mirrors spyglass-velocity.
+    // tasks as consuming an undeclared output.
     archiveClassifier.set("thin")
 }
 

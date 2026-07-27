@@ -1,6 +1,7 @@
 package net.medievalrp.spyglass.plugin.command.service;
 
 import java.util.UUID;
+import net.medievalrp.spyglass.plugin.command.TeleportWorldToken;
 import net.medievalrp.spyglass.plugin.command.render.Feedback;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -12,9 +13,8 @@ import org.jetbrains.annotations.ApiStatus;
 /**
  * Backs the {@code /spyglass tele <world> <x> <y> <z>} subcommand that search
  * results wire to via click events. World is resolved by UUID first and
- * then by name, so the renderer can emit either; in practice it emits
- * the UUID because that's stable across server restarts where worlds
- * get renamed.
+ * then by name, so records written by another server resolve to the
+ * same-named local dimension without transferring the player.
  *
  * <p>Coordinates land at block-center (+0.5 on x/z) to match v1's
  * {@code /sgtele} behavior — the player stands on the block's top
@@ -28,6 +28,11 @@ public final class TeleportService {
     /** Generous Y-axis bounds covering vanilla overworld + nether + end. */
     private static final double MIN_Y = -2048D;
     private static final double MAX_Y = 2048D;
+    private final ServiceSupport support;
+
+    public TeleportService(ServiceSupport support) {
+        this.support = support;
+    }
 
     public void execute(CommandSender sender, String worldArg, String xArg, String yArg, String zArg) {
         if (!(sender instanceof Player player)) {
@@ -59,7 +64,12 @@ public final class TeleportService {
             sender.sendMessage(Feedback.error("Teleport coordinates out of range."));
             return;
         }
-        player.teleport(new Location(world, x, y, z));
+        player.teleportAsync(new Location(world, x, y, z)).thenAccept(isTeleported -> {
+            if (!isTeleported) {
+                support.onPlayer(player, () ->
+                        player.sendMessage(Feedback.error("Teleport failed.")));
+            }
+        });
     }
 
     private static World resolveWorld(String arg) {
@@ -70,6 +80,9 @@ public final class TeleportService {
             }
         } catch (IllegalArgumentException ignored) {
         }
-        return Bukkit.getWorld(arg);
+        World byLiteralName = Bukkit.getWorld(arg);
+        return byLiteralName != null
+                ? byLiteralName
+                : Bukkit.getWorld(TeleportWorldToken.decode(arg));
     }
 }

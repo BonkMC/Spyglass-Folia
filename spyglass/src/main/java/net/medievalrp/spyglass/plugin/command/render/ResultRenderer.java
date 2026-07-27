@@ -36,6 +36,7 @@ import net.medievalrp.spyglass.api.event.TeleportRecord;
 import net.medievalrp.spyglass.api.extension.DisplayRenderer;
 import net.medievalrp.spyglass.api.query.QueryResult;
 import net.medievalrp.spyglass.api.util.BlockLocation;
+import net.medievalrp.spyglass.plugin.command.TeleportWorldToken;
 import net.medievalrp.spyglass.plugin.config.SpyglassConfig;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -245,7 +246,13 @@ public final class ResultRenderer {
 
     private static ClickEvent teleportClick(BlockLocation loc) {
         return ClickEvent.runCommand("/spyglass tele "
-                + loc.worldId() + " " + loc.x() + " " + loc.y() + " " + loc.z());
+                + teleportWorld(loc) + " " + loc.x() + " " + loc.y() + " " + loc.z());
+    }
+
+    private static String teleportWorld(BlockLocation location) {
+        return location.worldName() == null || location.worldName().isBlank()
+                ? location.worldId().toString()
+                : TeleportWorldToken.encode(location.worldName());
     }
 
     private static String shortDate(Instant occurred) {

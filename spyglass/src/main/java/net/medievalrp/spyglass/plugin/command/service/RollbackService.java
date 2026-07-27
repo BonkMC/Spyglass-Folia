@@ -36,6 +36,7 @@ import net.medievalrp.spyglass.plugin.rollback.UndoStack;
 import net.medievalrp.spyglass.plugin.storage.UndoReferenceBson;
 import net.medievalrp.spyglass.plugin.util.ChunkRelighter;
 import net.medievalrp.spyglass.plugin.util.ChunkResender;
+import net.medievalrp.spyglass.plugin.util.WorldReference;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.ApiStatus;
@@ -220,7 +221,7 @@ public final class RollbackService {
     public void execute(CommandSender sender, String raw, RollbackMode mode) {
         // Resolve any ip: addresses off-thread first; the continuation runs the
         // parse + queueing on the main thread. No ip: -> runs inline.
-        ipResolver.resolve(raw, resolved -> executeResolved(sender, raw, mode, resolved));
+        ipResolver.resolve(sender, raw, resolved -> executeResolved(sender, raw, mode, resolved));
     }
 
     private void executeResolved(CommandSender sender, String raw, RollbackMode mode,
@@ -287,7 +288,7 @@ public final class RollbackService {
                 + " starting before the recorder drained: " + detail
                 + ". The newest events may be missing from this rollback; re-run once the"
                 + " backlog clears (see /spyglass stats) to catch them.");
-        support.onMainThread(() -> job.sender.sendMessage(Feedback.bonus(
+        support.onSender(job.sender, () -> job.sender.sendMessage(Feedback.bonus(
                 "Recorder still draining: " + detail + ". Rollback may miss the most recent"
                 + " events; re-run after it clears to catch the rest.")));
     }
@@ -406,19 +407,19 @@ public final class RollbackService {
         // Chunks already pre-warmed by an earlier window of this job. Doubles
         // as the distinct-chunk tally for the summary (every effect's chunk
         // lands here), so no separate string set is built per applied cell.
-        Map<UUID, Set<Long>> warmedChunks = new HashMap<>();
+        Map<WorldReference, Set<Long>> warmedChunks = new HashMap<>();
         java.util.LinkedHashMap<String, Integer> skipCounts = new java.util.LinkedHashMap<>();
         // Per-world bounding boxes of applied writes — recorded into the
         // operation reference so search synthesis (#22) and operators
         // know where the op landed. {minX,minY,minZ,maxX,maxY,maxZ}.
-        java.util.LinkedHashMap<UUID, int[]> worldBoxes = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<WorldReference, int[]> worldBoxes = new java.util.LinkedHashMap<>();
         // Undo capture is BY REFERENCE (#17): one small row written at
         // completion records the resolved query + a time ceiling, and
         // /spyglass undo replays the same record set in the opposite
         // direction. Nothing is captured per effect.
 
         if (startCursor != null) {
-            support.onMainThread(() -> sender.sendMessage(Feedback.bonus(
+            support.onSender(sender, () -> sender.sendMessage(Feedback.bonus(
                     "Resuming from cursor: " + initialApplied + " applied + "
                             + initialSkipped + " skipped before crash.")));
         }
@@ -469,9 +470,11 @@ public final class RollbackService {
                     cur = store.streamRollbackEffects(request, cur, ask, rollbackDirection,
                             new net.medievalrp.spyglass.plugin.storage.RecordStore.RollbackEffectSink() {
                                 @Override
-                                public void block(UUID worldId, int x, int y, int z, String blockData,
+                                public void block(UUID worldId, String worldName,
+                                                  int x, int y, int z, String blockData,
                                                   String expectedData, Instant occurred, UUID id) {
-                                    acc.block(worldId, x, y, z, blockData, expectedData, occurred, id);
+                                    acc.block(new WorldReference(worldId, worldName),
+                                            x, y, z, blockData, expectedData, occurred, id);
                                     if (acc.full()) {
                                         putWindow(ready, acc.drain());
                                     }
@@ -542,8 +545,8 @@ public final class RollbackService {
                 // main thread), so a redundant one stalls the window by
                 // up to a tick. Most windows after the first few skip
                 // it entirely.
-                Map<UUID, Set<Long>> freshChunks = new HashMap<>();
-                for (Map.Entry<UUID, Set<Long>> entry : window.prewarmChunks().entrySet()) {
+                Map<WorldReference, Set<Long>> freshChunks = new HashMap<>();
+                for (Map.Entry<WorldReference, Set<Long>> entry : window.prewarmChunks().entrySet()) {
                     Set<Long> seenChunks = warmedChunks.computeIfAbsent(
                             entry.getKey(), k -> new HashSet<>());
                     Set<Long> fresh = new HashSet<>();
@@ -581,18 +584,20 @@ public final class RollbackService {
                 RollbackEngine.ApplyCounts counts = new RollbackEngine.ApplyCounts();
                 List<RollbackResult> complexResults = List.of();
                 try {
-                    for (Map.Entry<UUID, BlockColumns> worldCols : window.columnsByWorld().entrySet()) {
+                    for (Map.Entry<WorldReference, BlockColumns> worldCols
+                            : window.columnsByWorld().entrySet()) {
                         BlockColumns cols = worldCols.getValue();
                         if (cols.count() == 0) {
                             continue;
                         }
-                        UUID worldId = worldCols.getKey();
+                        WorldReference worldReference = worldCols.getKey();
                         java.util.concurrent.CompletableFuture<RollbackEngine.ApplyCounts> fut =
                                 new java.util.concurrent.CompletableFuture<>();
                         support.onMainThread(() -> {
                                 engine.protectMaterials(protectedMaterials);
                                 engine.includeInRollback(includeContainers, includeEntities);
-                                engine.applyColumnsChunked(worldId, cols, sender, support, batchSize, cancelFlag)
+                                engine.applyColumnsChunked(worldReference, cols, sender, support,
+                                                batchSize, cancelFlag)
                                         .whenComplete((c, err) -> {
                                             if (err != null) fut.completeExceptionally(err);
                                             else fut.complete(c);
@@ -619,7 +624,7 @@ public final class RollbackService {
                     Throwable cause = ex.getCause() == null ? ex : ex.getCause();
                     logger.warning("Spyglass " + mode.label() + " window apply failed: " + cause);
                     final String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
-                    support.onMainThread(() -> sender.sendMessage(
+                    support.onSender(sender, () -> sender.sendMessage(
                             Feedback.error(mode.label() + " failed: " + msg)));
                     return;
                 }
@@ -667,7 +672,7 @@ public final class RollbackService {
                 // superset of the applied box — safe: the op reference is only
                 // emitted when applied > 0, and synthesis (#22) re-filters
                 // within it.
-                for (Map.Entry<UUID, int[]> boxEntry : window.boxes().entrySet()) {
+                for (Map.Entry<WorldReference, int[]> boxEntry : window.boxes().entrySet()) {
                     int[] wb = boxEntry.getValue();
                     worldBoxes.merge(boxEntry.getKey(),
                             new int[]{wb[0], wb[1], wb[2], wb[3], wb[4], wb[5]},
@@ -686,7 +691,7 @@ public final class RollbackService {
                 if (sender instanceof Player progressTarget) {
                     int appliedSoFar = totalApplied;
                     int skippedSoFar = totalSkipped;
-                    support.onMainThread(() -> progressTarget.sendActionBar(
+                    support.onPlayer(progressTarget, () -> progressTarget.sendActionBar(
                             net.kyori.adventure.text.Component.text(
                                     "Rolling back: " + appliedSoFar + " applied, " + skippedSoFar + " skipped")));
                 }
@@ -697,14 +702,14 @@ public final class RollbackService {
                 logger.warning("Spyglass " + mode.label() + " stream read failed: " + readFailed);
                 final String msg = readFailed.getMessage() == null
                         ? readFailed.toString() : readFailed.getMessage();
-                support.onMainThread(() -> sender.sendMessage(
+                support.onSender(sender, () -> sender.sendMessage(
                         Feedback.error(mode.label() + " failed: " + msg)));
                 return;
             }
         } catch (RuntimeException unexpected) {
             logger.warning("Spyglass " + mode.label() + " streaming failure: " + unexpected);
             final String msg = unexpected.getMessage() == null ? unexpected.toString() : unexpected.getMessage();
-            support.onMainThread(() -> sender.sendMessage(
+            support.onSender(sender, () -> sender.sendMessage(
                     Feedback.error(mode.label() + " failed: " + msg)));
             return;
         } finally {
@@ -715,7 +720,8 @@ public final class RollbackService {
         }
 
         if (totalSeen == 0) {
-            support.onMainThread(() -> sender.sendMessage(Feedback.error("No results.")));
+            support.onSender(sender, () ->
+                    sender.sendMessage(Feedback.error("No results.")));
             return;
         }
 
@@ -753,7 +759,7 @@ public final class RollbackService {
         java.util.List<net.medievalrp.spyglass.plugin.storage.UndoReferenceBson.WorldBox> boxes =
                 worldBoxes.entrySet().stream()
                         .map(e -> new net.medievalrp.spyglass.plugin.storage.UndoReferenceBson.WorldBox(
-                                e.getKey(), e.getValue()[0], e.getValue()[1], e.getValue()[2],
+                                e.getKey().worldId(), e.getValue()[0], e.getValue()[1], e.getValue()[2],
                                 e.getValue()[3], e.getValue()[4], e.getValue()[5]))
                         .toList();
         String reference = net.medievalrp.spyglass.plugin.storage.UndoReferenceBson.encodeBase64(
@@ -782,7 +788,8 @@ public final class RollbackService {
                 java.time.Instant opOccurred = java.time.Instant.now();
                 BlockLocation opLocation = boxes.isEmpty()
                         ? new BlockLocation(new UUID(0L, 0L), "", 0, 0, 0)
-                        : new BlockLocation(boxes.get(0).worldId(), "",
+                        : new BlockLocation(boxes.get(0).worldId(),
+                                worldBoxes.keySet().iterator().next().worldName(),
                                 boxes.get(0).minX(), boxes.get(0).minY(), boxes.get(0).minZ());
                 net.medievalrp.spyglass.api.event.Source opSource = sender instanceof Player p
                         ? net.medievalrp.spyglass.api.event.Source.player(p.getUniqueId(), p.getName())
@@ -802,7 +809,7 @@ public final class RollbackService {
         Summary summary = new Summary(totalApplied, totalSkipped, totalErrors,
                 chunkCount, elapsedMs);
         boolean undoUnavailableFinal = undoUnavailable;
-        support.onMainThread(() -> deliverStreamingSummary(
+        support.onSender(sender, () -> deliverStreamingSummary(
                 sender, mode, summary, skipCounts, undoUnavailableFinal));
         // A rollback bounded by an explicit before: ceiling can land a
         // mid-history state: newer records above the ceiling at the same
@@ -849,7 +856,7 @@ public final class RollbackService {
             }
             String amount = count > NEWER_HISTORY_WARN_CAP
                     ? NEWER_HISTORY_WARN_CAP + "+" : String.valueOf(count);
-            support.onMainThread(() -> sender.sendMessage(Feedback.bonus(
+            support.onSender(sender, () -> sender.sendMessage(Feedback.bonus(
                     "Heads up: " + amount + " newer record(s) matching this query sit above"
                             + " the before: ceiling, so the area may now show a mid-history"
                             + " state. Roll back the newer window too, or re-run without"
@@ -893,14 +900,14 @@ public final class RollbackService {
     // pay a chunk-load stall inside its tick budget. Takes the packed
     // (cx, cz) set the window accumulator built record-by-record.
     // No-op outside a live Bukkit server (tests).
-    private CompletableFuture<Void> preWarmChunks(Map<UUID, Set<Long>> byWorld) {
+    private CompletableFuture<Void> preWarmChunks(Map<WorldReference, Set<Long>> byWorld) {
         try {
             if (byWorld.isEmpty() || Bukkit.getServer() == null) {
                 return CompletableFuture.completedFuture(null);
             }
             List<CompletableFuture<?>> futures = new ArrayList<>();
-            for (Map.Entry<UUID, Set<Long>> entry : byWorld.entrySet()) {
-                World world = Bukkit.getWorld(entry.getKey());
+            for (Map.Entry<WorldReference, Set<Long>> entry : byWorld.entrySet()) {
+                World world = entry.getKey().resolve().orElse(null);
                 if (world == null) {
                     continue;
                 }
@@ -960,10 +967,10 @@ public final class RollbackService {
     // effects as objects, the chunks to pre-warm, the per-world bounding
     // box, the keyset position after the last row folded in (for
     // crash-resume checkpoints), and how many rows were consumed to build it.
-    private record Window(Map<UUID, BlockColumns> columnsByWorld,
+    private record Window(Map<WorldReference, BlockColumns> columnsByWorld,
                           List<RollbackEffect> complex,
-                          Map<UUID, Set<Long>> prewarmChunks,
-                          Map<UUID, int[]> boxes,
+                          Map<WorldReference, Set<Long>> prewarmChunks,
+                          Map<WorldReference, int[]> boxes,
                           @org.jetbrains.annotations.Nullable
                           net.medievalrp.spyglass.plugin.storage.QueryPage.Cursor cursorAfter,
                           int seenDelta) {
@@ -1015,10 +1022,10 @@ public final class RollbackService {
         private final int windowSize;
         private final int columnInitialCapacity;
         private final java.util.concurrent.atomic.AtomicLong foldNanos;
-        private Map<UUID, BlockColumns> columnsByWorld;
+        private Map<WorldReference, BlockColumns> columnsByWorld;
         private List<RollbackEffect> complex;
-        private Map<UUID, Set<Long>> prewarm;
-        private Map<UUID, int[]> boxes;
+        private Map<WorldReference, Set<Long>> prewarm;
+        private Map<WorldReference, int[]> boxes;
         private java.time.Instant lastOccurred;
         private UUID lastId;
         private int effectCount;
@@ -1053,17 +1060,17 @@ public final class RollbackService {
         // every row - a coalesced row was consumed off the wire and must
         // advance checkpoints - while effectCount tracks distinct rows so
         // window fullness stays a bound on live memory, not rows read.
-        void block(UUID worldId, int x, int y, int z, String blockData,
+        void block(WorldReference worldReference, int x, int y, int z, String blockData,
                    String expectedData, java.time.Instant occurred, UUID id) {
             long start = System.nanoTime();
             seen++;
             lastOccurred = occurred;
             lastId = id;
             BlockColumns cols = columnsByWorld.computeIfAbsent(
-                    worldId, k -> new BlockColumns(columnInitialCapacity));
+                    worldReference, k -> new BlockColumns(columnInitialCapacity));
             if (cols.addOrReplace(x, y, z, cols.intern(blockData), cols.intern(expectedData))) {
                 effectCount++;
-                recordChunkAndBox(worldId, x, y, z);
+                recordChunkAndBox(worldReference, x, y, z);
             }
             foldNanos.addAndGet(System.nanoTime() - start);
         }
@@ -1079,7 +1086,7 @@ public final class RollbackService {
             complex.add(intern(effect));
             BlockLocation loc = locationOf(effect);
             if (loc != null) {
-                recordChunkAndBox(loc.worldId(), loc.x(), loc.y(), loc.z());
+                recordChunkAndBox(WorldReference.from(loc), loc.x(), loc.y(), loc.z());
             }
             foldNanos.addAndGet(System.nanoTime() - start);
         }
@@ -1092,10 +1099,11 @@ public final class RollbackService {
             lastId = id;
         }
 
-        private void recordChunkAndBox(UUID worldId, int x, int y, int z) {
+        private void recordChunkAndBox(WorldReference worldReference, int x, int y, int z) {
             long packed = ((long) (x >> 4) << 32) | ((z >> 4) & 0xFFFFFFFFL);
-            prewarm.computeIfAbsent(worldId, k -> new HashSet<>()).add(packed);
-            int[] box = boxes.computeIfAbsent(worldId, k -> new int[]{x, y, z, x, y, z});
+            prewarm.computeIfAbsent(worldReference, k -> new HashSet<>()).add(packed);
+            int[] box = boxes.computeIfAbsent(
+                    worldReference, k -> new int[]{x, y, z, x, y, z});
             if (x < box[0]) box[0] = x;
             if (y < box[1]) box[1] = y;
             if (z < box[2]) box[2] = z;
@@ -1206,10 +1214,14 @@ public final class RollbackService {
     // replay. Best-effort and fully off the hot path: the Starlight
     // recompute runs off-main and each chunk is resent with fresh light as
     // it lands. No-ops cleanly where the relight API is unavailable.
-    static void relightWrittenChunks(ServiceSupport support, Map<UUID, Set<Long>> chunksByWorld) {
+    static void relightWrittenChunks(
+            ServiceSupport support, Map<WorldReference, Set<Long>> chunksByWorld) {
+        if (support.isRegionized()) {
+            return;
+        }
         try {
-            for (Map.Entry<UUID, Set<Long>> entry : chunksByWorld.entrySet()) {
-                World world = Bukkit.getWorld(entry.getKey());
+            for (Map.Entry<WorldReference, Set<Long>> entry : chunksByWorld.entrySet()) {
+                World world = entry.getKey().resolve().orElse(null);
                 Set<Long> chunks = entry.getValue();
                 if (world == null || chunks.isEmpty()) {
                     continue;
@@ -1219,8 +1231,13 @@ public final class RollbackService {
                 for (Long key : chunks) {
                     keys[i++] = key;
                 }
-                support.onMainThread(() -> ChunkRelighter.relight(world, keys,
-                        (cx, cz) -> support.onMainThread(() -> ChunkResender.resend(world, cx, cz))));
+                int firstChunkX = (int) (keys[0] >> 32);
+                int firstChunkZ = (int) keys[0];
+                support.onRegion(world, firstChunkX, firstChunkZ,
+                        () -> ChunkRelighter.relight(world, keys,
+                                (chunkX, chunkZ) -> support.onRegion(
+                                        world, chunkX, chunkZ,
+                                        () -> ChunkResender.resend(world, chunkX, chunkZ))));
             }
         } catch (Throwable t) {
             // Relight is best-effort: a lighting-refresh hiccup must never

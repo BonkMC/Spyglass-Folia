@@ -1,6 +1,7 @@
 package net.medievalrp.spyglass.plugin.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -91,5 +92,50 @@ class SpyglassConfigLoadMigrationTest {
             assertThat(siblings.filter(p -> p.getFileName().toString().endsWith(".bak")))
                     .isEmpty();
         }
+    }
+
+    @Test
+    void networkModeRequiresMariaDbAndAUniqueServerName(@TempDir Path dataFolder)
+            throws Exception {
+        Path file = dataFolder.resolve("config.conf");
+        Files.writeString(file, "config-version = " + SpyglassConfig.CONFIG_VERSION + "\n"
+                + "database { backend = \"sqlite\" }\n"
+                + "network { enabled = true }\n"
+                + "server { name = \"survival-1\" }\n");
+
+        assertThatThrownBy(() -> SpyglassConfig.load(pluginIn(dataFolder)))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("mariadb");
+
+        Files.writeString(file, "config-version = " + SpyglassConfig.CONFIG_VERSION + "\n"
+                + "database { backend = \"mariadb\" }\n"
+                + "network { enabled = true }\n"
+                + "server { name = \"default\" }\n");
+
+        assertThatThrownBy(() -> SpyglassConfig.load(pluginIn(dataFolder)))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("unique server.name");
+    }
+
+    @Test
+    void networkModeLoadsWithMariaDbAndAUniqueServerName(@TempDir Path dataFolder)
+            throws Exception {
+        Path file = dataFolder.resolve("config.conf");
+        Files.writeString(file, "config-version = " + SpyglassConfig.CONFIG_VERSION + "\n"
+                + "database { backend = \"mysql\" }\n"
+                + "network {\n"
+                + "  enabled = true\n"
+                + "  poll-interval-millis = 25\n"
+                + "  sync-timeout-millis = 100\n"
+                + "  instance-timeout-millis = 150\n"
+                + "}\n"
+                + "server { name = \"survival-1\" }\n");
+
+        SpyglassConfig config = SpyglassConfig.load(pluginIn(dataFolder));
+
+        assertThat(config.network().enabled()).isTrue();
+        assertThat(config.network().pollIntervalMillis()).isEqualTo(50);
+        assertThat(config.network().syncTimeoutMillis()).isEqualTo(500);
+        assertThat(config.network().instanceTimeoutMillis()).isEqualTo(1000);
     }
 }

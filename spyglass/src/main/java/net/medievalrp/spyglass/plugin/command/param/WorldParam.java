@@ -24,7 +24,7 @@ public final class WorldParam implements QueryParamHandler {
         if (world == null) {
             throw new ParamParseException("Unknown world: " + value);
         }
-        return new QueryPredicate.Eq("location.worldId", world.getUID());
+        return WorldPredicates.matches(world);
     }
 
     @Override

@@ -1,19 +1,18 @@
 package net.medievalrp.spyglass.plugin.listener.modern;
 
 import java.util.function.Consumer;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+import net.medievalrp.spyglass.plugin.command.service.ServiceSupport;
 
 public final class DelayedInteractionTracker {
 
-    private final JavaPlugin plugin;
+    private final ServiceSupport scheduler;
 
-    public DelayedInteractionTracker(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public DelayedInteractionTracker(ServiceSupport scheduler) {
+        this.scheduler = scheduler;
     }
 
     /**
@@ -21,15 +20,21 @@ public final class DelayedInteractionTracker {
      * callback receives the block state as it stands at that time and the
      * player, and is responsible for deciding whether anything changed.
      */
-    public void scheduleAfter(int delayTicks, Player player, Location location,
+    public void scheduleAfter(int delayTicks, Location location,
                               Consumer<DelayedContext> callback) {
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        World world = location.getWorld();
+        if (world == null) {
+            return;
+        }
+        scheduler.onRegionLater(
+                world, location.getBlockX() >> 4, location.getBlockZ() >> 4,
+                delayTicks, () -> {
             Block current = location.getBlock();
             Material nowMaterial = current.getType();
-            callback.accept(new DelayedContext(player, location, nowMaterial));
-        }, delayTicks);
+            callback.accept(new DelayedContext(location, nowMaterial));
+        });
     }
 
-    public record DelayedContext(Player player, Location location, Material currentMaterial) {
+    public record DelayedContext(Location location, Material currentMaterial) {
     }
 }

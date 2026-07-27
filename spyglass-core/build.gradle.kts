@@ -35,16 +35,13 @@ dependencies {
     api(project(":spyglass-api"))
 
     // BlockSnapshot.material is org.bukkit.Material — paper-api stays
-    // compileOnly here so the storage module can be loaded into either a
-    // Paper plugin (server provides the API) or a Velocity plugin (which
-    // ships paper-api inside its shadow jar) without forcing a hard
-    // runtime dependency on Bukkit.
+    // compileOnly here because the Paper/Folia server provides the API
+    // at runtime.
     compileOnly("io.papermc.paper:paper-api:$paperApiVersion")
     compileOnly("org.jetbrains:annotations:$jetbrainsAnnotationsVersion")
 
-    // Storage drivers. Exposed as `api` so consumer modules (spyglass,
-    // spyglass-velocity) can use Mongo / ClickHouse driver classes
-    // directly — same contract as before the extraction.
+    // Storage drivers. Exposed as `api` so the Spyglass plugin can use
+    // Mongo / ClickHouse driver classes directly.
     api("org.mongodb:mongodb-driver-sync:$mongoDriverVersion")
     api("org.mongodb:bson-record-codec:$mongoDriverVersion")
     api("com.clickhouse:clickhouse-jdbc:$clickhouseClientVersion")
@@ -55,15 +52,15 @@ dependencies {
 
     // Embedded SQLite backend (#106): a third, zero-ops record store for
     // small/medium servers. xerial sqlite-jdbc bundles the native SQLite
-    // engine; exposed as `api` so the plugin + proxy can construct the
-    // store directly, mirroring the Mongo / ClickHouse drivers above.
+    // engine; exposed as `api` so the plugin can construct the store
+    // directly, mirroring the Mongo / ClickHouse drivers above.
     api("org.xerial:sqlite-jdbc:$sqliteJdbcVersion")
 
     // MariaDB / MySQL backend (#169): the client-server SQL store for
     // operators who already run a MariaDB or MySQL server. MariaDB
     // Connector/J speaks both wire protocols, so one driver serves
     // backend = "mariadb" and "mysql". Exposed as `api` like the other
-    // drivers so the plugin + proxy construct the store directly.
+    // drivers so the plugin can construct the store directly.
     api("org.mariadb.jdbc:mariadb-java-client:$mariaDbDriverVersion")
 
     testImplementation(project(":spyglass-api"))

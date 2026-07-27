@@ -39,6 +39,15 @@ class SqlitePredicateToSqlTest {
                 public Integer uuidId(UUID value) {
                     return PLAYER.equals(value) ? 3 : null;
                 }
+
+                @Override
+                public List<Integer> uuidIdsByName(String name) {
+                    return switch (name) {
+                        case "Alice" -> List.of(3);
+                        case "world" -> List.of(5, 8);
+                        default -> List.of();
+                    };
+                }
             });
 
     private String translate(QueryPredicate predicate) {
@@ -53,6 +62,14 @@ class SqlitePredicateToSqlTest {
     @Test
     void resolvesUuidEqualityToPaletteId() {
         assertThat(translate(new QueryPredicate.Eq("source.playerId", PLAYER))).isEqualTo("player = 3");
+    }
+
+    @Test
+    void resolvesNamesAcrossEveryMatchingUuid() {
+        assertThat(translate(new QueryPredicate.Eq("source.playerName", "Alice")))
+                .isEqualTo("player IN (3)");
+        assertThat(translate(new QueryPredicate.Eq("location.worldName", "world")))
+                .isEqualTo("world IN (5, 8)");
     }
 
     @Test

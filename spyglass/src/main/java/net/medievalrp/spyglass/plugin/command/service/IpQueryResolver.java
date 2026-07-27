@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+import org.bukkit.command.CommandSender;
 import net.medievalrp.spyglass.plugin.command.param.IpParam;
 import net.medievalrp.spyglass.plugin.command.param.QueryStringParser;
 import org.jetbrains.annotations.ApiStatus;
@@ -48,6 +49,13 @@ public final class IpQueryResolver {
      * overwhelming majority of searches.
      */
     public void resolve(String raw, Consumer<Map<String, List<UUID>>> continuation) {
+        resolve(null, raw, continuation);
+    }
+
+    public void resolve(
+            CommandSender sender,
+            String raw,
+            Consumer<Map<String, List<UUID>>> continuation) {
         List<String> ips = parser.extractIpValues(raw);
         if (ips == null || ips.isEmpty()) {
             continuation.accept(Map.of());
@@ -64,7 +72,11 @@ public final class IpQueryResolver {
                     logger.warning("Spyglass ip: resolve failed for " + ip + ": " + ex.getMessage());
                 }
             }
-            support.onMainThread(() -> continuation.accept(resolved));
+            if (sender == null) {
+                support.onMainThread(() -> continuation.accept(resolved));
+            } else {
+                support.onSender(sender, () -> continuation.accept(resolved));
+            }
         });
     }
 }

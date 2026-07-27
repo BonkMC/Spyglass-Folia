@@ -2,7 +2,7 @@ plugins {
     base
     // Aggregates module publications and uploads them to the Maven Central
     // Portal. Only :spyglass-api is included (see the dependencies block below),
-    // so spyglass-core / spyglass / spyglass-velocity stay unpublished GPL
+    // so spyglass-core / spyglass stay unpublished GPL
     // internals. Publish task: publishAggregationToCentralPortal.
     id("com.gradleup.nmcp.aggregation") version "1.6.1"
 }
@@ -42,7 +42,6 @@ dependencies {
 }
 
 val paperApiVersion = "1.21.8-R0.1-SNAPSHOT"
-val velocityApiVersion = "3.4.0-SNAPSHOT"
 val mongoDriverVersion = "5.5.0"
 val clickhouseClientVersion = "0.9.8"
 val sqliteJdbcVersion = "3.50.1.0"
@@ -153,10 +152,6 @@ subprojects {
                         // Two undo-stack ITs are Docker-gated; same
                         // no-Docker-baseline reasoning as spyglass-core.
                         "spyglass" -> 0.20.toBigDecimal()
-                        // Proxy module is read-only and thin (just a
-                        // command + renderer + parser); no floor until
-                        // its test suite stabilises.
-                        "spyglass-velocity" -> 0.00.toBigDecimal()
                         // Importer is a standalone CLI wrapper now; the
                         // SqliteSource/mapper engine tests that used to
                         // justify raising this floor moved to
@@ -204,7 +199,6 @@ tasks.register("deployToRpServer") {
 
 extra.apply {
     set("paperApiVersion", paperApiVersion)
-    set("velocityApiVersion", velocityApiVersion)
     set("mongoDriverVersion", mongoDriverVersion)
     set("clickhouseClientVersion", clickhouseClientVersion)
     set("sqliteJdbcVersion", sqliteJdbcVersion)

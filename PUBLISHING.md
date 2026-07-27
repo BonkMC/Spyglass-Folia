@@ -1,7 +1,7 @@
 # Publishing spyglass-api to Maven Central
 
 Only `spyglass-api` is published (Apache-2.0). The GPL modules
-(`spyglass-core`, `spyglass`, `spyglass-velocity`) stay unpublished internals.
+(`spyglass-core`, `spyglass`) stay unpublished internals.
 
 Coordinates: `net.medievalrp:spyglass-api:<version>`, where `<version>` is the
 project version in `gradle.properties`, so the library tracks each release.

@@ -21,6 +21,7 @@ public record SpyglassConfig(
         java.util.List<String> commandRedact,
         Tool tool,
         Server server,
+        Network network,
         Metrics metrics,
         Analytics analytics,
         Commands commands,
@@ -167,6 +168,20 @@ public record SpyglassConfig(
             default -> throw new IOException("Unknown database.backend: " + backendName
                     + " (expected 'sqlite', 'mongo', 'clickhouse', or 'mariadb')");
         };
+        Server server = new Server(root.node("server", "name").getString("default"));
+        Network network = new Network(
+                root.node("network", "enabled").getBoolean(false),
+                root.node("network", "poll-interval-millis").getLong(100L),
+                root.node("network", "sync-timeout-millis").getLong(3_000L),
+                root.node("network", "instance-timeout-millis").getLong(10_000L));
+        if (network.enabled() && backend != Backend.MARIADB) {
+            throw new IOException(
+                    "network.enabled requires database.backend = \"mariadb\" or \"mysql\"");
+        }
+        if (network.enabled() && "default".equalsIgnoreCase(server.name())) {
+            throw new IOException(
+                    "network.enabled requires a unique server.name on every backend server");
+        }
         return new SpyglassConfig(
                 new Database(
                         backend,
@@ -228,7 +243,8 @@ public record SpyglassConfig(
                         // on one block, already capped by limits.search-result,
                         // so a long default is cheap (#271).
                         Duration.parse(root.node("tool", "lookback").getString("26w"))),
-                new Server(root.node("server", "name").getString("default")),
+                server,
+                network,
                 parseMetrics(root),
                 parseAnalytics(root),
                 // /s as a third root alias next to /spyglass and /sg. On by
@@ -579,6 +595,18 @@ public record SpyglassConfig(
             if (name.isEmpty()) {
                 name = "default";
             }
+        }
+    }
+
+    public record Network(
+            boolean enabled,
+            long pollIntervalMillis,
+            long syncTimeoutMillis,
+            long instanceTimeoutMillis) {
+        public Network {
+            pollIntervalMillis = Math.max(50L, pollIntervalMillis);
+            syncTimeoutMillis = Math.max(500L, syncTimeoutMillis);
+            instanceTimeoutMillis = Math.max(syncTimeoutMillis * 2L, instanceTimeoutMillis);
         }
     }
 

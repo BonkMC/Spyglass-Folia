@@ -13,6 +13,7 @@ import net.medievalrp.spyglass.plugin.command.render.Feedback;
 import net.medievalrp.spyglass.plugin.salvage.SalvageSnapshot;
 import net.medievalrp.spyglass.plugin.salvage.SalvageStore;
 import net.medievalrp.spyglass.plugin.salvage.SalvageView;
+import net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawalDispatcher;
 import net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawals;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -31,12 +32,16 @@ public final class SalvageService {
     /** InvUI GUI on supported versions; {@code null} means command-only. */
     @Nullable
     private final SalvageView view;
-    private final SalvageWithdrawals withdrawals;
+    private final SalvageWithdrawalDispatcher withdrawals;
     private final int listLimit;
     private final ServiceSupport support;
 
-    public SalvageService(SalvageStore store, @Nullable SalvageView view, SalvageWithdrawals withdrawals,
-                          int listLimit, ServiceSupport support) {
+    public SalvageService(
+            SalvageStore store,
+            @Nullable SalvageView view,
+            SalvageWithdrawalDispatcher withdrawals,
+            int listLimit,
+            ServiceSupport support) {
         this.store = store;
         this.view = view;
         this.withdrawals = withdrawals;
@@ -60,7 +65,7 @@ public final class SalvageService {
         boolean recoverable = sender instanceof Player;
         support.onAsyncThread(() -> {
             List<SalvageSnapshot> snaps = store.list(listLimit);
-            support.onMainThread(() -> renderListing(sender, snaps, recoverable));
+            support.onSender(sender, () -> renderListing(sender, snaps, recoverable));
         });
     }
 
@@ -85,7 +90,7 @@ public final class SalvageService {
         }
         support.onAsyncThread(() -> {
             Resolution resolution = resolve(needle);
-            support.onMainThread(() -> completeWithdraw(player, needle, resolution));
+            support.onPlayer(player, () -> completeWithdraw(player, needle, resolution));
         });
     }
 
@@ -97,10 +102,10 @@ public final class SalvageService {
             case NONE -> player.sendMessage(Feedback.error("No salvage snapshot matches '" + needle + "'."));
             case AMBIGUOUS -> player.sendMessage(Feedback.error(
                     "Ambiguous id '" + needle + "' - use more characters or the full id."));
-            case FOUND -> {
-                SalvageWithdrawals.BulkResult result = withdrawals.withdrawAll(player, resolution.snapshot());
-                player.sendMessage(describe(result));
-            }
+            case FOUND -> withdrawals.withdrawAll(
+                    player,
+                    resolution.snapshot(),
+                    result -> player.sendMessage(describe(result)));
         }
     }
 

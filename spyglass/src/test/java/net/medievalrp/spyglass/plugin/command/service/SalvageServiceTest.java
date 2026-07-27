@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.logging.Logger;
 import net.kyori.adventure.text.Component;
 import net.medievalrp.spyglass.plugin.salvage.SalvageStore;
+import net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawalDispatcher;
 import net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawals;
 import org.bukkit.command.CommandSender;
 import org.junit.jupiter.api.Test;
@@ -25,8 +26,12 @@ import org.junit.jupiter.api.Test;
  */
 class SalvageServiceTest {
 
-    private static SalvageWithdrawals withdrawals(SalvageStore store) {
-        return new SalvageWithdrawals(store, Runnable::run, null, Logger.getLogger("test"));
+    private static SalvageWithdrawalDispatcher withdrawals(SalvageStore store) {
+        SalvageWithdrawals withdrawals =
+                new SalvageWithdrawals(store, Runnable::run, null, Logger.getLogger("test"));
+        return new SalvageWithdrawalDispatcher(
+                store, withdrawals, Runnable::run, (player, runnable) -> runnable.run(),
+                Logger.getLogger("test"));
     }
 
     @Test

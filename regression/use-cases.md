@@ -139,7 +139,7 @@ Measurement discipline (from the perf campaign): same-run comparisons only; judg
 | H5 | Search by enchantment `ench:sharpness=5` | SG-only expected | K | bot |
 | H6 | Multiple players `p:a,b` + multiple actions | Filter combination parity | K | bot |
 | H7 | Negations (exclude a player, exclude an action) | Parity of negative filters | K | bot |
-| H8 | Cross-server search via Velocity proxy (`srv:`) | SG-only expected (CP has no proxy story) | K | man |
+| H8 | Cross-server search from a Paper/Folia server (`srv:`) | Shared-MariaDB result is visible without a proxy component | K | man |
 | H9 | Wand/inspector click on grief block | Full block history incl. synthesized rolled entries; CP inspector parity; click-to-teleport UX notes | U,C | man |
 | H10 | Time syntax: `t:30s`, `t:4w`, `t:1d2h` | Window math exact; no DST/timezone drift across a boundary | C | bot |
 | H11 | Global search without radius (`-g`) | Permission-gated; default radius enforced when omitted | U | bot |

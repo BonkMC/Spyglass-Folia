@@ -226,6 +226,33 @@ class MariaDbRecordStoreIT {
     }
 
     @Test
+    void secondInstanceFindsLateRemotePaletteEntriesByName() {
+        try (MariaDbRecordStore remote =
+                     new MariaDbRecordStore(host, port, db, user, pw, false, RETENTION)) {
+            UUID remoteWorld = UUID.fromString("00000000-0000-0000-0000-0000000000cd");
+            BlockBreakRecord record = new BlockBreakRecord(
+                    EventIds.newId(),
+                    "break",
+                    BASE,
+                    BASE.plusSeconds(RETENTION),
+                    Origin.player(),
+                    Source.player(UUID.randomUUID(), "RemoteAlice"),
+                    new BlockLocation(remoteWorld, "world", 12, 64, 12),
+                    "survival-2",
+                    "STONE",
+                    simple(Material.STONE, "minecraft:stone"),
+                    simple(Material.AIR, "minecraft:air"));
+            store.save(List.of(record));
+
+            QueryResult found = remote.query(request(List.of(
+                    new QueryPredicate.Eq("source.playerName", "remotealice"),
+                    new QueryPredicate.Eq("location.worldName", "world"))));
+
+            assertThat(found.records()).containsExactly(record);
+        }
+    }
+
+    @Test
     void simpleBlockRoundTripsThroughColumnsWithNoPayload() throws SQLException {
         BlockBreakRecord record = simpleBreak(10);
         store.save(List.of(record));

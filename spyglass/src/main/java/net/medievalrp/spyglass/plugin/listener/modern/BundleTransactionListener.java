@@ -15,7 +15,6 @@ import net.medievalrp.spyglass.plugin.listener.RecordingSupport;
 import net.medievalrp.spyglass.plugin.pipeline.Recorder;
 import net.medievalrp.spyglass.plugin.util.BlockLocations;
 import net.medievalrp.spyglass.api.capture.ItemSerialization;
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -24,7 +23,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BundleMeta;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.plugin.java.JavaPlugin;
+import net.medievalrp.spyglass.plugin.command.service.ServiceSupport;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -38,12 +37,13 @@ public final class BundleTransactionListener implements RecordingListener {
 
     private final Recorder recorder;
     private final RecordingSupport support;
-    private final JavaPlugin plugin;
+    private final ServiceSupport scheduler;
 
-    public BundleTransactionListener(Recorder recorder, RecordingSupport support, JavaPlugin plugin) {
+    public BundleTransactionListener(
+            Recorder recorder, RecordingSupport support, ServiceSupport scheduler) {
         this.recorder = recorder;
         this.support = support;
-        this.plugin = plugin;
+        this.scheduler = scheduler;
     }
 
     @Override
@@ -68,7 +68,7 @@ public final class BundleTransactionListener implements RecordingListener {
         int slotIndex = event.getSlot();
         int rawSlot = event.getRawSlot();
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        scheduler.onPlayerLater(player, 1L, () -> {
             if (slotSnap != null) {
                 ItemStack afterStack = rawSlot >= 0 ? event.getView().getItem(rawSlot) : null;
                 diffAndEmit(player, slotSnap, slotIndex, afterStack);

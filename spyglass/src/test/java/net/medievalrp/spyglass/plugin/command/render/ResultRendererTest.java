@@ -220,7 +220,7 @@ class ResultRendererTest {
 
         assertThat(findRunCommand(rendered))
                 .as("click event on a single result should be /spyglass tele")
-                .startsWith("/spyglass tele " + WORLD_ID);
+                .startsWith("/spyglass tele sgw:d29ybGQ");
     }
 
     @Test

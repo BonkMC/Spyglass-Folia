@@ -175,8 +175,8 @@ trees. Imported `JoinRecord.address` is therefore always `null`, and
 Spyglass's `i:<ip>` cross-event correlation can't be reconstructed from
 imported data.
 
-If this matters, capture IPs from a separate source (Velocity proxy
-log, network appliance) and merge them in post-import. We don't ship
+If this matters, capture IPs from a separate source (proxy log or
+network appliance) and merge them in post-import. We don't ship
 tooling for that.
 
 ### `co_block.rolled_back` flag

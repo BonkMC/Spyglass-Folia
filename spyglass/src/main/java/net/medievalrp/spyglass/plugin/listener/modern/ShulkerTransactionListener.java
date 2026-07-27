@@ -33,13 +33,13 @@ public final class ShulkerTransactionListener implements RecordingListener {
     private final RecordingSupport support;
     // Main-thread, next-tick: shift-click deposits are diffed after the
     // click applies, per-slot, exactly like the chest listener (#268).
-    private final java.util.concurrent.Executor nextTick;
+    private final net.medievalrp.spyglass.plugin.command.service.ServiceSupport scheduler;
 
     public ShulkerTransactionListener(Recorder recorder, RecordingSupport support,
-                                      java.util.concurrent.Executor nextTick) {
+                                      net.medievalrp.spyglass.plugin.command.service.ServiceSupport scheduler) {
         this.recorder = recorder;
         this.support = support;
-        this.nextTick = nextTick;
+        this.scheduler = scheduler;
     }
 
     @Override
@@ -227,7 +227,7 @@ public final class ShulkerTransactionListener implements RecordingListener {
             beforeTop[i] = item == null ? null : item.clone();
         }
         Material movedType = moved.getType();
-        nextTick.execute(() -> {
+        scheduler.onPlayerLater(player, 1L, () -> {
             for (int slot = 0; slot < topSize; slot++) {
                 ItemStack now = top.getItem(slot);
                 if (now == null || now.getType() != movedType) {

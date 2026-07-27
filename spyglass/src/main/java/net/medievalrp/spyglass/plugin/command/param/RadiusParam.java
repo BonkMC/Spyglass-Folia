@@ -35,7 +35,7 @@ public final class RadiusParam implements QueryParamHandler {
 
     public static QueryPredicate groupAround(BlockLocation origin, int radius) {
         return new QueryPredicate.And(List.of(
-                new QueryPredicate.Eq("location.worldId", origin.worldId()),
+                WorldPredicates.matches(origin),
                 new QueryPredicate.Range("location.x", origin.x() - radius, origin.x() + radius),
                 new QueryPredicate.Range("location.y", origin.y() - radius, origin.y() + radius),
                 new QueryPredicate.Range("location.z", origin.z() - radius, origin.z() + radius)));

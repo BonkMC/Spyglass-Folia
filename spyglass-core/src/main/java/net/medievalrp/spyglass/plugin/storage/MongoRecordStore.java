@@ -440,6 +440,7 @@ public final class MongoRecordStore implements RecordStore {
                 // under force-overwrite (#69), so pass null.
                 BsonDocument loc = doc.getDocument(RecordFields.LOCATION);
                 sink.block(readUuid(loc, RecordFields.WORLD_ID),
+                        loc.getString(RecordFields.WORLD_NAME, new org.bson.BsonString("")).getValue(),
                         loc.getInt32(RecordFields.X).getValue(),
                         loc.getInt32(RecordFields.Y).getValue(),
                         loc.getInt32(RecordFields.Z).getValue(),

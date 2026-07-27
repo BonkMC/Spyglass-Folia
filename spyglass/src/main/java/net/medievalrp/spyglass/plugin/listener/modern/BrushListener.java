@@ -62,7 +62,9 @@ public final class BrushListener implements RecordingListener {
         }
         BlockLocation location = BlockLocations.fromLocation(block.getLocation());
         BlockSnapshot originalSnapshot = BlockSnapshots.of(start, block.getBlockData().getAsString());
-        tracker.scheduleAfter(DELAY_TICKS, event.getPlayer(), block.getLocation(), ctx -> {
+        net.medievalrp.spyglass.api.event.Source source =
+                support.playerSource(event.getPlayer());
+        tracker.scheduleAfter(DELAY_TICKS, block.getLocation(), ctx -> {
             if (ctx.currentMaterial() == start) {
                 return;
             }
@@ -73,8 +75,7 @@ public final class BrushListener implements RecordingListener {
             recorder.record(new BlockBreakRecord(
                     support.newId(), "brush", occurred,
                     support.expiresAt(occurred),
-                    support.playerOrigin(),
-                    support.playerSource(ctx.player()),
+                    support.playerOrigin(), source,
                     location, support.serverName(), start.name(), originalSnapshot, postSnapshot));
         });
     }

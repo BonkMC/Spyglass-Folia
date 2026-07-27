@@ -53,10 +53,23 @@ public final class ContainerTransactionListener implements RecordingListener {
     private final Recorder recorder;
     private final RecordingSupport support;
     private final Executor serializer;
-    private final Executor nextTick;
+    private final java.util.function.BiConsumer<Player, Runnable> nextTick;
 
     public ContainerTransactionListener(Recorder recorder, RecordingSupport support,
                                         Executor serializer, Executor nextTick) {
+        this(recorder, support, serializer, (player, runnable) -> nextTick.execute(runnable));
+    }
+
+    public ContainerTransactionListener(
+            Recorder recorder, RecordingSupport support, Executor serializer,
+            net.medievalrp.spyglass.plugin.command.service.ServiceSupport scheduler) {
+        this(recorder, support, serializer,
+                (player, runnable) -> scheduler.onPlayerLater(player, 1L, runnable));
+    }
+
+    private ContainerTransactionListener(
+            Recorder recorder, RecordingSupport support, Executor serializer,
+            java.util.function.BiConsumer<Player, Runnable> nextTick) {
         this.recorder = recorder;
         this.support = support;
         this.serializer = serializer;
@@ -232,7 +245,7 @@ public final class ContainerTransactionListener implements RecordingListener {
             beforeTop[i] = cloneOrNull(top.getItem(i));
         }
         Material movedType = moved.getType();
-        nextTick.execute(() -> {
+        nextTick.accept(player, () -> {
             for (int rawSlot = 0; rawSlot < topSize; rawSlot++) {
                 ItemStack now = top.getItem(rawSlot);
                 if (now == null || now.getType() != movedType) {

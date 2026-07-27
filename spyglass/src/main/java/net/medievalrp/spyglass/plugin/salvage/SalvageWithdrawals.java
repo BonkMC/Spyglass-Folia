@@ -91,6 +91,10 @@ public final class SalvageWithdrawals {
             // this view rendered.
             return new Outcome(Status.EMPTIED, null);
         }
+        return withdrawFresh(player, fresh, slot);
+    }
+
+    Outcome withdrawFresh(Player player, SalvageSnapshot fresh, int slot) {
         int freshIndex = indexOfSlot(fresh.items(), slot);
         if (freshIndex < 0) {
             // This slot was already taken through another view.
@@ -143,6 +147,10 @@ public final class SalvageWithdrawals {
         if (snap == null) {
             return new BulkResult(0, 0, true, false);
         }
+        return withdrawAllFresh(player, snap);
+    }
+
+    BulkResult withdrawAllFresh(Player player, SalvageSnapshot snap) {
         List<StoredItem> leftovers = new ArrayList<>();
         List<Integer> marked = new ArrayList<>();
         int stacks = 0;

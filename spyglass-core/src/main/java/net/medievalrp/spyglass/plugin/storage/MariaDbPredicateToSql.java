@@ -42,6 +42,10 @@ final class MariaDbPredicateToSql {
         Integer dictId(String value);
 
         Integer uuidId(UUID value);
+
+        default List<Integer> uuidIdsByName(String name) {
+            return List.of();
+        }
     }
 
     static final class UnsupportedPredicateException extends RuntimeException {
@@ -58,6 +62,7 @@ final class MariaDbPredicateToSql {
         DICT,
         /** A {@code uuids} reference. */
         UUID_REF,
+        UUID_NAME,
         /** Epoch-seconds timestamp column. */
         INSTANT_SEC,
         /** Plain signed integer column (coordinates). */
@@ -77,7 +82,9 @@ final class MariaDbPredicateToSql {
             Map.entry("occurred", new Col("occurred", Kind.INSTANT_SEC)),
             Map.entry("origin.kind", new Col("origin_kind", Kind.DICT)),
             Map.entry("source.playerId", new Col("player", Kind.UUID_REF)),
+            Map.entry("source.playerName", new Col("player", Kind.UUID_NAME)),
             Map.entry("location.worldId", new Col("world", Kind.UUID_REF)),
+            Map.entry("location.worldName", new Col("world", Kind.UUID_NAME)),
             Map.entry("location.x", new Col("x", Kind.INT)),
             Map.entry("location.y", new Col("y", Kind.INT)),
             Map.entry("location.z", new Col("z", Kind.INT)),
@@ -141,12 +148,22 @@ final class MariaDbPredicateToSql {
             throw new UnsupportedPredicateException(
                     "MariaDB backend cannot push a regex match on interned column '" + field + "'.");
         }
+        if (col.kind() == Kind.UUID_NAME) {
+            return translateIds(col.name(), palette.uuidIdsByName(String.valueOf(value)));
+        }
         Long resolved = resolve(col, value);
         // A literal absent from the palette can't match any row.
         return resolved == null ? "0" : col.name() + " = " + resolved;
     }
 
     private String translateIn(Col col, List<?> values) {
+        if (col.kind() == Kind.UUID_NAME) {
+            List<Integer> ids = values.stream()
+                    .flatMap(value -> palette.uuidIdsByName(String.valueOf(value)).stream())
+                    .distinct()
+                    .toList();
+            return translateIds(col.name(), ids);
+        }
         List<Long> ids = new ArrayList<>(values.size());
         for (Object value : values) {
             if (value instanceof Pattern) {
@@ -169,6 +186,15 @@ final class MariaDbPredicateToSql {
             sb.append(ids.get(i));
         }
         return sb.append(")").toString();
+    }
+
+    private static String translateIds(String column, List<Integer> ids) {
+        if (ids.isEmpty()) {
+            return "0";
+        }
+        return column + " IN (" + ids.stream()
+                .map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(", ")) + ")";
     }
 
     private String translateRange(QueryPredicate.Range range) {
@@ -241,6 +267,7 @@ final class MariaDbPredicateToSql {
                 Integer id = palette.uuidId((UUID) value);
                 yield id == null ? null : id.longValue();
             }
+            case UUID_NAME -> throw new IllegalArgumentException("UUID names resolve to multiple ids");
         };
     }
 

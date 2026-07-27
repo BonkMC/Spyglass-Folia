@@ -116,8 +116,15 @@ public interface RecordStore extends AutoCloseable {
          * @param expectedData the expected-current block-data for the #27
          *     state check, or {@code null} for no check
          */
-        void block(UUID worldId, int x, int y, int z, String blockData,
-                   @Nullable String expectedData, Instant occurred, UUID id);
+        default void block(UUID worldId, String worldName, int x, int y, int z, String blockData,
+                           @Nullable String expectedData, Instant occurred, UUID id) {
+            block(worldId, x, y, z, blockData, expectedData, occurred, id);
+        }
+
+        default void block(UUID worldId, int x, int y, int z, String blockData,
+                           @Nullable String expectedData, Instant occurred, UUID id) {
+            throw new UnsupportedOperationException("Rollback block sink is not implemented");
+        }
 
         /** Any effect that isn't a simple block-replace (rare). */
         void complex(RollbackEffect effect, Instant occurred, UUID id);
@@ -170,7 +177,7 @@ public interface RecordStore extends AutoCloseable {
                     && br.replacement() != null && br.replacement().simple()) {
                 net.medievalrp.spyglass.api.util.BlockLocation loc = br.location();
                 String expected = br.expectedCurrent() == null ? null : br.expectedCurrent().blockData();
-                sink.block(loc.worldId(), loc.x(), loc.y(), loc.z(),
+                sink.block(loc.worldId(), loc.worldName(), loc.x(), loc.y(), loc.z(),
                         br.replacement().blockData(), expected, record.occurred(), record.id());
             } else {
                 sink.complex(effect, record.occurred(), record.id());

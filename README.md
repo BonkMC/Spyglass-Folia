@@ -2,6 +2,8 @@
 
 Forensic logging and rollback for Paper 1.21.x. Spyglass records block, container, chat, command, combat, and movement events, lets you query them with a `key:value` language, and rolls any of them back by block, player, cause, or in bulk while the server holds 20 TPS.
 
+> **BonkMC fork.** This branch adds native Folia scheduling and shared-network operation directly between Paper/Folia servers over MariaDB/MySQL. Searches, lookups, rollbacks, restores, undo data, tool state, and salvage use the shared database. Remote world UUIDs resolve through the same-named local dimension; result clicks teleport locally and never transfer a player. No Velocity plugin or proxy messaging is required or shipped. See [FORK.md](FORK.md) for setup and upstream-sync instructions.
+
 > **Preview.** Spyglass is built for medium and large servers. The embedded SQLite backend runs it with no external database, so a small server can use it too, though CoreProtect or Prism stay lighter-weight there.
 
 A standalone CLI imports existing CoreProtect databases into Spyglass — see [`docs/importer.md`](docs/importer.md) and [Migrating from CoreProtect](#migrating-from-coreprotect).
@@ -76,7 +78,7 @@ Spyglass runs on SQLite, MongoDB, ClickHouse, or MariaDB/MySQL. The embedded SQL
 
 ## Requirements
 
-- Paper 1.21.8 or newer 1.21.x
+- Paper or Folia 1.21.8 or newer 1.21.x
 - Java 21
 - A database, one of:
   - Embedded SQLite, no external database (the default); writes to a file under the plugin folder
@@ -119,8 +121,7 @@ Imports cover blocks, kills, sessions, chat, commands, container deposits/withdr
 
 - `spyglass-api/` is the public API. Third-party plugins depend on this only. Published to Maven Central as `net.medievalrp:spyglass-api`; see [API.md](API.md).
 - `spyglass-core/` holds the shared internals (codecs, storage glue).
-- `spyglass/` is the Paper plugin.
-- `spyglass-velocity/` is an optional Velocity proxy companion for cross-server search. It is read-only by design: it never writes records and never rolls back.
+- `spyglass/` is the Paper/Folia plugin and owns all cross-server coordination.
 - `spyglass-importer/` is a standalone CLI for migrating CoreProtect databases into Spyglass, plus a side-by-side query bench. See [`docs/importer.md`](docs/importer.md).
 
 ## AI policy
@@ -132,7 +133,7 @@ Spyglass is human-led. We make the architectural and design decisions, and we wi
 Spyglass is open source under a split license, mapped in [LICENSING.md](LICENSING.md):
 
 - The public extension API (`spyglass-api`) is licensed under the [Apache License 2.0](spyglass-api/LICENSE), so third-party plugins can depend on it freely.
-- The plugin and its internals (`spyglass-core`, `spyglass`, `spyglass-velocity`) are licensed under the [GNU General Public License v3.0](LICENSE).
+- The plugin and its internals (`spyglass-core`, `spyglass`) are licensed under the [GNU General Public License v3.0](LICENSE).
 
 Contributions are covered by the [CLA](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).
 

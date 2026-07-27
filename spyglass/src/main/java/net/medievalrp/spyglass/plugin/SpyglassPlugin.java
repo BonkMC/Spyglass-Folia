@@ -173,10 +173,10 @@ public final class SpyglassPlugin extends JavaPlugin {
      * cleanly land (shatter in water/lava, void, /kill, anti-cheat
      * despawn) accumulate forever -- #128.
      */
-    private org.bukkit.scheduler.BukkitTask fallingBlockPurgeTask;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask fallingBlockPurgeTask;
     // #168: repeating async task that logs the ingest analytics report. Null
     // unless analytics.enabled; cancelled in onDisable.
-    private org.bukkit.scheduler.BukkitTask analyticsTask;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask analyticsTask;
     private UndoStack undoStack;
     private ToolStateStore toolStateStore;
     private SalvageStore salvageStore;
@@ -193,11 +193,13 @@ public final class SpyglassPlugin extends JavaPlugin {
     private DeferredSerializer deferredSerializer;
     private SpyglassConfig config;
     private Metrics metrics;
+    private net.medievalrp.spyglass.plugin.network.MySqlNetworkCoordinator networkCoordinator;
     private WorldEditSubscriber worldEditSubscriber;
     private WorldEditLifecycleListener worldEditLifecycle;
 
     @Override
     public void onEnable() {
+        MariaDbRecordStore sharedMariaDbStore = null;
         try {
             config = SpyglassConfig.load(this);
         } catch (Exception ex) {
@@ -270,6 +272,7 @@ public final class SpyglassPlugin extends JavaPlugin {
                     undoStack = new MariaDbUndoStack(mariaStore);
                     toolStateStore = new MariaDbToolStateStore(mariaStore);
                     salvageStore = new MariaDbSalvageStore(mariaStore, 30L);
+                    sharedMariaDbStore = mariaStore;
                 }
             }
             // #22: searches synthesize per-block rolled-* entries
@@ -332,6 +335,27 @@ public final class SpyglassPlugin extends JavaPlugin {
         // stage first — otherwise a rollback right after a deposit burst
         // would snapshot the queue before the in-flight records land.
         recorder.setFlushBarrier(deferredSerializer::awaitQuiescence);
+        if (config.network().enabled()) {
+            try {
+                networkCoordinator =
+                        new net.medievalrp.spyglass.plugin.network.MySqlNetworkCoordinator(
+                                java.util.Objects.requireNonNull(sharedMariaDbStore),
+                                recorder,
+                                config.server().name(),
+                                config.network().pollIntervalMillis(),
+                                config.network().syncTimeoutMillis(),
+                                config.network().instanceTimeoutMillis(),
+                                getLogger());
+                recordStore = new net.medievalrp.spyglass.plugin.network.NetworkSynchronizedRecordStore(
+                        recordStore, networkCoordinator);
+                getLogger().info("Spyglass network synchronization enabled over MariaDB/MySQL.");
+            } catch (RuntimeException failure) {
+                getLogger().log(Level.SEVERE,
+                        "Failed to initialize Spyglass network synchronization.", failure);
+                setEnabled(false);
+                return;
+            }
+        }
 
         // One-release upgrade shim (#307): the removed wal-batched durability
         // mode may have left fsynced-but-unacked batch files behind after an
@@ -363,9 +387,13 @@ public final class SpyglassPlugin extends JavaPlugin {
         // Bind the per-server id stream before any listener can mint a
         // record id (#44): instance bits keep sequences collision-free
         // when multiple backends share one store.
-        net.medievalrp.spyglass.api.util.EventIds.bindInstance(config.server().name().hashCode());
+        int eventInstance = networkCoordinator == null
+                ? config.server().name().hashCode()
+                : networkCoordinator.eventInstance();
+        net.medievalrp.spyglass.api.util.EventIds.bindInstance(eventInstance);
         RecordingSupport support = new RecordingSupport(config.storage().retention(), config.server().name());
-        DelayedInteractionTracker delayedTracker = new DelayedInteractionTracker(this);
+        ServiceSupport serviceSupport = ServiceSupport.bukkit(this);
+        DelayedInteractionTracker delayedTracker = new DelayedInteractionTracker(serviceSupport);
         // #226: shared between the hopper-transfer listener and the purge timer
         // below. Collapses repeating automated hopper flow so a farm line does
         // not flood the store; holds no Bukkit state.
@@ -389,7 +417,7 @@ public final class SpyglassPlugin extends JavaPlugin {
                 new BucketListener(recorder, support, deferredSerializer, enabledEvents),
                 new FallingBlockLandListener(recorder, support),
                 new ContainerTransactionListener(recorder, support, deferredSerializer,
-                        task -> getServer().getScheduler().runTask(this, task)),
+                        serviceSupport),
                 new ContainerDragListener(recorder, support),
                 new ContainerInteractListener(recorder, support),
                 new BlockUseListener(recorder, support),
@@ -422,8 +450,8 @@ public final class SpyglassPlugin extends JavaPlugin {
                 new BookshelfListener(recorder, support),
                 new DecoratedPotListener(recorder, support),
                 new ShulkerTransactionListener(recorder, support,
-                        task -> getServer().getScheduler().runTask(this, task)),
-                new BundleTransactionListener(recorder, support, this),
+                        serviceSupport),
+                new BundleTransactionListener(recorder, support, serviceSupport),
                 new CrafterListener(recorder, support, deferredSerializer),
                 new SculkListener(recorder, support),
                 new BrushListener(recorder, support, delayedTracker),
@@ -451,11 +479,7 @@ public final class SpyglassPlugin extends JavaPlugin {
         SpyglassApiImpl apiImpl = new SpyglassApiImpl(
                 recorder, recordStore, queryExecutor, enabledEvents, apiLimits,
                 config.server().name(), getLogger());
-        // Store-backed name fallback: resolves players the Bukkit cache never
-        // saw (imported histories, shared stores) into playerId predicates so
-        // rollback-by-name works on the SQLite/MariaDB lean readers.
-        apiImpl.registerQueryParamHandler(
-                PlayerParam.withStoreFallback(recordStore::resolvePlayerId));
+        apiImpl.registerQueryParamHandler(new PlayerParam());
         apiImpl.registerQueryParamHandler(new EventParam(enabledEvents));
         apiImpl.registerQueryParamHandler(new RadiusParam());
         apiImpl.registerQueryParamHandler(new ChunkRadiusParam());
@@ -527,20 +551,26 @@ public final class SpyglassPlugin extends JavaPlugin {
         // phase of a large rollback. getChunk and all tile-entity /
         // finish work stay on the main thread (see RollbackEngine), so
         // the only NMS touched off-main is the locked section write.
-        int worldWriteThreads = Math.max(2,
-                Math.min(8, Runtime.getRuntime().availableProcessors() - 2));
-        final java.util.concurrent.atomic.AtomicInteger writeThreadSeq =
-                new java.util.concurrent.atomic.AtomicInteger();
-        this.worldWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(
-                worldWriteThreads, r -> {
-                    Thread t = new Thread(r, "Spyglass-WorldWriter-" + writeThreadSeq.incrementAndGet());
-                    t.setDaemon(true);
-                    t.setPriority(Thread.NORM_PRIORITY);
-                    return t;
-                });
-        engine.setWorldWriteExecutor(this.worldWriteExecutor);
-        engine.setWorldWriteParallelism(worldWriteThreads);
-        getLogger().info("Spyglass rollback world-write pool: " + worldWriteThreads + " threads");
+        if (serviceSupport.isRegionized()) {
+            getLogger().info("Spyglass: Folia region scheduling enabled.");
+        } else {
+            int worldWriteThreads = Math.max(2,
+                    Math.min(8, Runtime.getRuntime().availableProcessors() - 2));
+            final java.util.concurrent.atomic.AtomicInteger writeThreadSeq =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            this.worldWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(
+                    worldWriteThreads, runnable -> {
+                        Thread thread = new Thread(
+                                runnable, "Spyglass-WorldWriter-" + writeThreadSeq.incrementAndGet());
+                        thread.setDaemon(true);
+                        thread.setPriority(Thread.NORM_PRIORITY);
+                        return thread;
+                    });
+            engine.setWorldWriteExecutor(this.worldWriteExecutor);
+            engine.setWorldWriteParallelism(worldWriteThreads);
+            getLogger().info("Spyglass rollback world-write pool: "
+                    + worldWriteThreads + " threads");
+        }
         // Plugin reference so the engine can hold a chunk ticket per
         // chunk during the async write phase — chunks pinned loaded
         // until each chunk's main-thread post-processing completes.
@@ -555,8 +585,6 @@ public final class SpyglassPlugin extends JavaPlugin {
         } else {
             getLogger().info("Spyglass: container salvage capture disabled for this backend.");
         }
-        ServiceSupport serviceSupport = ServiceSupport.bukkit(this);
-
         QueryStringParser parser = new QueryStringParser(apiImpl, config);
         net.medievalrp.spyglass.plugin.command.service.IpQueryResolver ipQueryResolver =
                 new net.medievalrp.spyglass.plugin.command.service.IpQueryResolver(
@@ -599,7 +627,7 @@ public final class SpyglassPlugin extends JavaPlugin {
                 toolStateStore, config.tool().material(), serviceSupport, getLogger());
         getServer().getPluginManager().registerEvents(
                 new WandInteractListener(toolService, searchService, config), this);
-        TeleportService teleportService = new TeleportService();
+        TeleportService teleportService = new TeleportService(serviceSupport);
 
         // CoreProtect import (Task 9): a separate credentials file
         // (import.conf, data-folder root) + import history cache + async
@@ -697,12 +725,18 @@ public final class SpyglassPlugin extends JavaPlugin {
         // click listeners, so no registerEvents here.
         SalvageWithdrawals salvageWithdrawals = salvageStore == null ? null
                 : new SalvageWithdrawals(salvageStore, queryExecutor, salvageWithdrawLogger, getLogger());
+        net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawalDispatcher
+                salvageWithdrawalDispatcher = salvageStore == null ? null
+                : new net.medievalrp.spyglass.plugin.salvage.SalvageWithdrawalDispatcher(
+                        salvageStore, salvageWithdrawals, queryExecutor,
+                        serviceSupport::onPlayer, getLogger());
         SalvageView salvageView = salvageStore == null ? null
                 : SalvageViews.guiOrNull(this, getServer().getBukkitVersion(), salvageStore,
-                        queryExecutor, serviceSupport::onMainThread, salvageWithdrawals,
+                        queryExecutor, serviceSupport::onPlayer, salvageWithdrawalDispatcher,
                         config.limits().searchResult(), getLogger());
         SalvageService salvageService = new SalvageService(
-                salvageStore, salvageView, salvageWithdrawals, config.limits().searchResult(), serviceSupport);
+                salvageStore, salvageView, salvageWithdrawalDispatcher,
+                config.limits().searchResult(), serviceSupport);
         // #168: /spyglass stats. Null ingestStats (analytics off) => the command
         // explains how to enable it.
         StatsService statsService = new StatsService(ingestStats, recorder::spillSnapshot);
@@ -774,20 +808,20 @@ public final class SpyglassPlugin extends JavaPlugin {
         // #226: the transfer dedup is a ConcurrentHashMap on the same 30 s
         // window, so it piggybacks on this sweep - same off-main, no
         // Bukkit-access safety as the falling-block purge.
-        final long PURGE_PERIOD_TICKS = 1200L; // 60 s at 20 TPS
-        this.fallingBlockPurgeTask = getServer().getScheduler()
-                .runTaskTimerAsynchronously(this, () -> {
+        this.fallingBlockPurgeTask = getServer().getAsyncScheduler()
+                .runAtFixedRate(this, task -> {
                     FallingBlockTracker.purgeExpired();
                     transferDedup.purgeExpired();
-                }, PURGE_PERIOD_TICKS, PURGE_PERIOD_TICKS);
+                }, 60L, 60L, java.util.concurrent.TimeUnit.SECONDS);
 
         // #168: periodic ingest analytics report (off the main thread; only
         // reads concurrent counters + cheap gauges). Off unless analytics.enabled.
         if (ingestStats != null) {
-            long intervalTicks = Math.max(20L, config.analytics().interval().seconds() * 20L);
-            this.analyticsTask = getServer().getScheduler().runTaskTimerAsynchronously(
-                    this, new IngestStatsReporter(ingestStats, getLogger()),
-                    intervalTicks, intervalTicks);
+            long intervalSeconds = Math.max(1L, config.analytics().interval().seconds());
+            IngestStatsReporter reporter = new IngestStatsReporter(ingestStats, getLogger());
+            this.analyticsTask = getServer().getAsyncScheduler().runAtFixedRate(
+                    this, task -> reporter.run(),
+                    intervalSeconds, intervalSeconds, java.util.concurrent.TimeUnit.SECONDS);
             getLogger().info("Spyglass analytics enabled: ingest report every "
                     + config.analytics().interval().seconds() + "s and via /spyglass stats.");
         }
@@ -858,6 +892,10 @@ public final class SpyglassPlugin extends JavaPlugin {
             } catch (Exception ex) {
                 getLogger().warning("Recorder shutdown failed: " + ex.getMessage());
             }
+        }
+        if (networkCoordinator != null) {
+            networkCoordinator.close();
+            networkCoordinator = null;
         }
         if (recordStore != null) {
             try {

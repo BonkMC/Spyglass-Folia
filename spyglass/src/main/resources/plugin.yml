@@ -2,6 +2,7 @@ name: Spyglass
 version: ${version}
 main: net.medievalrp.spyglass.plugin.SpyglassPlugin
 api-version: "1.21"
+folia-supported: true
 authors:
   - itdontmatta
 softdepend:

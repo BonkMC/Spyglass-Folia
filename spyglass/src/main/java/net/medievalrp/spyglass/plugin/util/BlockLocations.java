@@ -1,7 +1,6 @@
 package net.medievalrp.spyglass.plugin.util;
 
 import java.util.Optional;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -72,11 +71,11 @@ public final class BlockLocations {
     }
 
     public static Optional<World> resolveWorld(net.medievalrp.spyglass.api.util.BlockLocation location) {
-        World world = Bukkit.getWorld(location.worldId());
-        if (world != null) {
-            return Optional.of(world);
-        }
-        return Optional.ofNullable(Bukkit.getWorld(location.worldName()));
+        return WorldReference.from(location).resolve();
+    }
+
+    public static Optional<World> resolveWorld(WorldReference worldReference) {
+        return worldReference.resolve();
     }
 
     public static Location toBlockCenter(net.medievalrp.spyglass.api.util.BlockLocation location) {

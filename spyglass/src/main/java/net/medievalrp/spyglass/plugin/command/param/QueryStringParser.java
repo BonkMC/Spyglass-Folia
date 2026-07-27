@@ -433,7 +433,7 @@ public final class QueryStringParser {
         BlockLocation min = box.min();
         BlockLocation max = box.max();
         return new QueryPredicate.And(List.of(
-                new QueryPredicate.Eq("location.worldId", box.worldId()),
+                WorldPredicates.matches(min),
                 new QueryPredicate.Range("location.x", min.x(), max.x()),
                 new QueryPredicate.Range("location.y", min.y(), max.y()),
                 new QueryPredicate.Range("location.z", min.z(), max.z())));

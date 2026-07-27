@@ -264,10 +264,10 @@ public final class WorldEditSubscriber {
             }
             drainScheduled = true;
             try {
-                Bukkit.getScheduler().runTask(plugin, () -> {
+                Bukkit.getGlobalRegionScheduler().runDelayed(plugin, task -> {
                     drainScheduled = false;
                     drain();
-                });
+                }, 1L);
             } catch (IllegalPluginAccessException disabling) {
                 // Plugin disabling — scheduler refuses new tasks. Drain now.
                 drainScheduled = false;

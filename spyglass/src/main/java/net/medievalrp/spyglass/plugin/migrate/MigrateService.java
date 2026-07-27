@@ -319,22 +319,22 @@ public final class MigrateService {
 
     // House-styled sender feedback (#252), mirroring ImportService.
     private void tell(CommandSender sender, String message) {
-        support.onMainThread(() -> sender.sendMessage(
+        support.onSender(sender, () -> sender.sendMessage(
                 net.medievalrp.spyglass.plugin.command.render.Feedback.info(message)));
     }
 
     private void tellWarn(CommandSender sender, String message) {
-        support.onMainThread(() -> sender.sendMessage(
+        support.onSender(sender, () -> sender.sendMessage(
                 net.medievalrp.spyglass.plugin.command.render.Feedback.warn(message)));
     }
 
     private void tellError(CommandSender sender, String message) {
-        support.onMainThread(() -> sender.sendMessage(
+        support.onSender(sender, () -> sender.sendMessage(
                 net.medievalrp.spyglass.plugin.command.render.Feedback.error(message)));
     }
 
     private void tellSuccess(CommandSender sender, String message) {
-        support.onMainThread(() -> sender.sendMessage(
+        support.onSender(sender, () -> sender.sendMessage(
                 net.medievalrp.spyglass.plugin.command.render.Feedback.success(message)));
     }
 }

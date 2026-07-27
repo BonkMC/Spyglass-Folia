@@ -183,6 +183,14 @@ public final class SqliteRecordStore implements RecordStore {
         public Integer uuidId(UUID value) {
             return resolveUuidId(value);
         }
+
+        @Override
+        public List<Integer> uuidIdsByName(String name) {
+            return uuidName.entrySet().stream()
+                    .filter(entry -> name.equalsIgnoreCase(entry.getValue()))
+                    .map(Map.Entry::getKey)
+                    .toList();
+        }
     };
     private final SqlitePredicateToSql predicateToSql = new SqlitePredicateToSql(palette);
 
@@ -770,8 +778,10 @@ public final class SqliteRecordStore implements RecordStore {
                 sink.skip(occurred, id);
                 return;
             }
-            UUID world = uuidValue(rs.getInt("world"));
-            sink.block(world, rs.getInt("x"), rs.getInt("y"), rs.getInt("z"),
+            int worldRef = rs.getInt("world");
+            UUID world = uuidValue(worldRef);
+            sink.block(world, uuidName.getOrDefault(worldRef, ""), rs.getInt("x"),
+                    rs.getInt("y"), rs.getInt("z"),
                     dictValue(blockRef), null, occurred, id);
             return;
         }
@@ -794,7 +804,7 @@ public final class SqliteRecordStore implements RecordStore {
         if (effect instanceof RollbackEffect.BlockReplace br
                 && br.replacement() != null && br.replacement().simple()) {
             BlockLocation loc = br.location();
-            sink.block(loc.worldId(), loc.x(), loc.y(), loc.z(),
+            sink.block(loc.worldId(), loc.worldName(), loc.x(), loc.y(), loc.z(),
                     br.replacement().blockData(), null, occurred, id);
         } else {
             sink.complex(effect, occurred, id);

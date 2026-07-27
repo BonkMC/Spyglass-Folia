@@ -59,7 +59,9 @@ public final class VaultListener implements RecordingListener {
         Material keyMaterial = inHand.getType();
         BlockLocation location = BlockLocations.fromLocation(block.getLocation());
         String blockData = block.getBlockData().getAsString();
-        tracker.scheduleAfter(DELAY_TICKS, event.getPlayer(), block.getLocation(), ctx -> {
+        net.medievalrp.spyglass.api.event.Source source =
+                support.playerSource(event.getPlayer());
+        tracker.scheduleAfter(DELAY_TICKS, block.getLocation(), ctx -> {
             Block now = ctx.location().getBlock();
             if (now.getType() != Material.VAULT) {
                 return;
@@ -74,8 +76,7 @@ public final class VaultListener implements RecordingListener {
             recorder.record(new BlockBreakRecord(
                     support.newId(), "vault", occurred,
                     support.expiresAt(occurred),
-                    support.playerOrigin(),
-                    support.playerSource(ctx.player()),
+                    support.playerOrigin(), source,
                     location, support.serverName(), keyMaterial.name(), pre, post));
         });
     }

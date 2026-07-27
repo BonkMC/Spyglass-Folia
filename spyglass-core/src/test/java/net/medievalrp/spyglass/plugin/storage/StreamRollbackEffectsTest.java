@@ -73,7 +73,7 @@ class StreamRollbackEffectsTest {
     }
 
     private static final class CapturingSink implements RecordStore.RollbackEffectSink {
-        record Block(UUID world, int x, int y, int z, String data, String expected) {
+        record Block(UUID world, String worldName, int x, int y, int z, String data, String expected) {
         }
 
         final List<Block> blocks = new java.util.ArrayList<>();
@@ -81,9 +81,10 @@ class StreamRollbackEffectsTest {
         int skips;
 
         @Override
-        public void block(UUID world, int x, int y, int z, String data, String expected,
+        public void block(UUID world, String worldName, int x, int y, int z,
+                          String data, String expected,
                           Instant occurred, UUID id) {
-            blocks.add(new Block(world, x, y, z, data, expected));
+            blocks.add(new Block(world, worldName, x, y, z, data, expected));
         }
 
         @Override
@@ -121,6 +122,7 @@ class StreamRollbackEffectsTest {
         assertThat(b.expected()).isEqualTo("minecraft:air");
         assertThat(b.x()).isEqualTo(7);
         assertThat(b.world()).isEqualTo(WORLD);
+        assertThat(b.worldName()).isEqualTo("world");
     }
 
     @Test

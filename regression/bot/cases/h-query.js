@@ -182,7 +182,7 @@ export default [
     },
 },
 
-{ id: 'H8', title: 'cross-server search via Velocity proxy', manual: 'needs the proxy rig; spyglass-velocity covered by its own tests' },
+{ id: 'H8', title: 'cross-server search from a backend server', manual: 'needs two Paper/Folia servers sharing MariaDB' },
 { id: 'H9', title: 'wand/inspector parity on a grief block', manual: 'wand interaction needs a human (or dedicated packet work)' },
 
 {

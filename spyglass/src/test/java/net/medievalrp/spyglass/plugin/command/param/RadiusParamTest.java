@@ -35,10 +35,11 @@ class RadiusParamTest {
         assertThat(and.predicates()).hasSize(4);
 
         QueryPredicate world = and.predicates().get(0);
-        assertThat(world).isInstanceOf(QueryPredicate.Eq.class);
-        QueryPredicate.Eq worldEq = (QueryPredicate.Eq) world;
-        assertThat(worldEq.field()).isEqualTo("location.worldId");
-        assertThat(worldEq.value()).isEqualTo(WORLD);
+        assertThat(world).isInstanceOf(QueryPredicate.Or.class);
+        QueryPredicate.Or worldMatch = (QueryPredicate.Or) world;
+        assertThat(worldMatch.predicates()).containsExactly(
+                new QueryPredicate.Eq("location.worldId", WORLD),
+                new QueryPredicate.Eq("location.worldName", "world"));
 
         // Axes must be location.x/y/z in order; each must be an
         // Range with the origin±radius bounds.
@@ -121,7 +122,7 @@ class RadiusParamTest {
         assertThat(helper).isInstanceOf(QueryPredicate.And.class);
         QueryPredicate.And and = (QueryPredicate.And) helper;
         assertThat(and.predicates()).hasSize(4);
-        assertThat(and.predicates().get(0)).isInstanceOf(QueryPredicate.Eq.class);
+        assertThat(and.predicates().get(0)).isInstanceOf(QueryPredicate.Or.class);
     }
 
     private static void assertRange(QueryPredicate p, String field, int lower, int upper) {

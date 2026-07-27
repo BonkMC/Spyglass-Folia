@@ -783,6 +783,7 @@ public final class ClickHouseRecordStore implements RecordStore {
             if (simple) {
                 // expectedData is unused under force-overwrite; pass null.
                 sink.block(row.getUUID("location_world_id"),
+                        row.getString("location_world_name"),
                         row.getInteger("location_x"),
                         row.getInteger("location_y"),
                         row.getInteger("location_z"),

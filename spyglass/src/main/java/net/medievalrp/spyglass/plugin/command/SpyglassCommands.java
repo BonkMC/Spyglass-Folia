@@ -32,8 +32,6 @@ import org.jetbrains.annotations.ApiStatus;
 @ApiStatus.Internal
 public final class SpyglassCommands {
 
-    // /sg is the short backend alias; /sgv on the Velocity proxy stays
-    // namespace-distinct so the proxy never shadows the Paper command.
     // /s joins unless commands.s-alias is disabled in config (#279, opt-out;
     // was opt-in under #250) - an operator turns it off when another plugin
     // on the server claims the single-letter root.

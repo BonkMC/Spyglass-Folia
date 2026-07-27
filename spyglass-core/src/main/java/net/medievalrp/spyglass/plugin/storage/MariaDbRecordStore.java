@@ -187,6 +187,11 @@ public final class MariaDbRecordStore implements RecordStore {
         public Integer uuidId(UUID value) {
             return resolveUuidId(value);
         }
+
+        @Override
+        public List<Integer> uuidIdsByName(String name) {
+            return resolveUuidIdsByName(name);
+        }
     };
     private final MariaDbPredicateToSql predicateToSql = new MariaDbPredicateToSql(palette);
 
@@ -264,7 +269,8 @@ public final class MariaDbRecordStore implements RecordStore {
                         Statement.RETURN_GENERATED_KEYS);
                 this.uuidInsert = writeConn.prepareStatement(
                         "INSERT INTO uuids(hi, lo, name) VALUES (?, ?, ?) "
-                                + "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
+                                + "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), "
+                                + "name = COALESCE(name, VALUES(name))",
                         Statement.RETURN_GENERATED_KEYS);
             }
 
@@ -842,8 +848,10 @@ public final class MariaDbRecordStore implements RecordStore {
                 sink.skip(occurred, id);
                 return;
             }
-            UUID world = uuidValue(rs.getInt("world"));
-            sink.block(world, rs.getInt("x"), rs.getInt("y"), rs.getInt("z"),
+            int worldRef = rs.getInt("world");
+            UUID world = uuidValue(worldRef);
+            sink.block(world, uuidNameValue(worldRef), rs.getInt("x"),
+                    rs.getInt("y"), rs.getInt("z"),
                     dictValue(blockRef), null, occurred, id);
             return;
         }
@@ -866,7 +874,7 @@ public final class MariaDbRecordStore implements RecordStore {
         if (effect instanceof RollbackEffect.BlockReplace br
                 && br.replacement() != null && br.replacement().simple()) {
             BlockLocation loc = br.location();
-            sink.block(loc.worldId(), loc.x(), loc.y(), loc.z(),
+            sink.block(loc.worldId(), loc.worldName(), loc.x(), loc.y(), loc.z(),
                     br.replacement().blockData(), null, occurred, id);
         } else {
             sink.complex(effect, occurred, id);
@@ -894,13 +902,13 @@ public final class MariaDbRecordStore implements RecordStore {
         boolean hasPlayer = !rs.wasNull();
         Source source = new Source("player",
                 hasPlayer ? uuidValue(playerRef) : null,
-                hasPlayer ? uuidName.get(playerRef) : null,
+                hasPlayer ? uuidNameValue(playerRef) : null,
                 null, null, null, null, null);
         int worldRef = rs.getInt("world");
         boolean hasWorld = !rs.wasNull();
         BlockLocation location = new BlockLocation(
                 hasWorld ? uuidValue(worldRef) : null,
-                hasWorld ? uuidName.get(worldRef) : null,
+                hasWorld ? uuidNameValue(worldRef) : null,
                 rs.getInt("x"), rs.getInt("y"), rs.getInt("z"));
         String server = dictValueOrNull(rs, "server");
         String target = dictValueOrNull(rs, "target");
@@ -1091,6 +1099,29 @@ public final class MariaDbRecordStore implements RecordStore {
         return val;
     }
 
+    private String uuidNameValue(int id) {
+        String name = uuidName.get(id);
+        if (name != null) {
+            return name;
+        }
+        synchronized (lookupLock) {
+            try (PreparedStatement ps = lookupConn.prepareStatement(
+                    "SELECT name FROM uuids WHERE id = ?")) {
+                ps.setInt(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next() || rs.getString(1) == null) {
+                        return "";
+                    }
+                    name = rs.getString(1);
+                    uuidName.putIfAbsent(id, name);
+                    return name;
+                }
+            } catch (SQLException ex) {
+                throw new RuntimeException("MariaDB uuid name lookup failed: " + ex.getMessage(), ex);
+            }
+        }
+    }
+
     private String dictValueOrNull(ResultSet rs, String column) throws SQLException {
         int id = rs.getInt(column);
         return rs.wasNull() ? null : dictValue(id);
@@ -1142,6 +1173,29 @@ public final class MariaDbRecordStore implements RecordStore {
             }
         }
         return null;
+    }
+
+    private List<Integer> resolveUuidIdsByName(String name) {
+        synchronized (lookupLock) {
+            List<Integer> ids = new ArrayList<>();
+            try (PreparedStatement ps = lookupConn.prepareStatement(
+                    "SELECT id, hi, lo, name FROM uuids WHERE name = ?")) {
+                ps.setString(1, name);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        int id = rs.getInt(1);
+                        UUID uuid = new UUID(rs.getLong(2), rs.getLong(3));
+                        ids.add(id);
+                        uuidForward.putIfAbsent(uuid, id);
+                        uuidReverse.putIfAbsent(id, uuid);
+                        uuidName.putIfAbsent(id, rs.getString(4));
+                    }
+                }
+            } catch (SQLException ex) {
+                throw new RuntimeException("MariaDB uuid name lookup failed: " + ex.getMessage(), ex);
+            }
+            return ids;
+        }
     }
 
     private String lookupDict(int id) {
